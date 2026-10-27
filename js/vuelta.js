@@ -401,6 +401,15 @@
     return prepared[key];
   }
 
+  // Vueltas importadas de tarjetas oficiales: solo el total de golpes por hoyo (hs.total), sin golpes en el mapa.
+  const isImported = (r) => !!(r && r.source === 'tarjeta');
+  function strokesOf(hs) {
+    if (!hs) return 0;
+    return hs.entries.length + hs.putts || hs.total || 0;
+  }
+  // Par del hoyo en esa vuelta (las pruebas de pitch & putt se juegan a par 54).
+  const parOf = (r, n) => (r.pars && r.pars[n]) || byNumber[n].par;
+
   function holeScore(n) {
     if (!round.scores[n]) round.scores[n] = { entries: [], putts: 0, done: false };
     return round.scores[n];
@@ -423,7 +432,9 @@
     const h = holeData(n);
     const hs = holeScore(n);
     const pos = positions(n);
-    const strokes = hs.entries.length + hs.putts;
+    const strokes = strokesOf(hs);
+    const par = parOf(round, n);
+    const card = isImported(round);
     const shots = [];
     let firstGreen = null;
     hs.entries.forEach((e, i) => {
@@ -433,16 +444,16 @@
       }
     });
     const firstShot = hs.entries.find((e) => e.t === 's');
-    const fairway = raw.par >= 4 && firstShot ? firstShot.l === 'fairway' : null;
+    const fairway = par >= 4 && firstShot ? firstShot.l === 'fairway' : null;
     const holedAt = hs.done ? strokes : null;
-    const gir = hs.done || firstGreen
-      ? (firstGreen != null && firstGreen <= raw.par - 2) || (holedAt != null && hs.putts === 0 && holedAt <= raw.par - 2)
+    const gir = card ? null : hs.done || firstGreen
+      ? (firstGreen != null && firstGreen <= par - 2) || (holedAt != null && hs.putts === 0 && holedAt <= par - 2)
       : null;
     const pens = hs.entries.filter((e) => e.t === 'p').length;
     const cur = pos[pos.length - 1];
     return {
-      par: raw.par, strokes, putts: hs.putts, done: hs.done, fairway, gir, pens, shots,
-      toPin: GC.dist(cur, h.pin), lie: lastLie(n), started: hs.entries.length + hs.putts > 0,
+      par, strokes, putts: card ? null : hs.putts, done: hs.done, fairway, gir, pens, shots,
+      toPin: GC.dist(cur, h.pin), lie: lastLie(n), started: strokes > 0,
     };
   }
 
@@ -460,12 +471,13 @@
     let played = 0;
     for (const n of r.holes) {
       const hs = r.scores[n];
-      if (!hs || !(hs.entries.length + hs.putts)) continue;
-      strokes += hs.entries.length + hs.putts;
+      const k = strokesOf(hs);
+      if (!k) continue;
+      strokes += k;
       played++;
       if (hs.done) {
-        doneStrokes += hs.entries.length + hs.putts;
-        par += byNumber[n].par;
+        doneStrokes += k;
+        par += parOf(r, n);
       }
     }
     return { strokes, par, played, diff: doneStrokes - par };
@@ -660,11 +672,11 @@
       const tee = TEES.find((x) => x[0] === r.tees);
       return `<div class="round-row" data-id="${esc(r.id)}">
         <div class="score num${t.diff < 0 ? ' under' : ''}">${t.played ? t.strokes : '–'}<small>${t.played ? signed(t.diff) : '·'}</small></div>
-        <div class="title">${esc(fmtDate(r.date))}${r.finished ? '' : '<span class="pill">En curso</span>'}</div>
-        <div class="meta">${route ? route[1] : ''} · ${tee ? tee[1] : r.tees} · ${t.played} hoyo${t.played === 1 ? '' : 's'} jugado${t.played === 1 ? '' : 's'}</div>
+        <div class="title">${esc(fmtDate(r.date))}${r.finished ? '' : '<span class="pill">En curso</span>'}${isImported(r) ? '<span class="pill soft">Tarjeta</span>' : ''}</div>
+        <div class="meta">${isImported(r) ? `${esc(r.event || 'Competición')} · ` : `${route ? route[1] : ''} · `}${tee ? tee[1] : r.tees} · ${t.played} hoyo${t.played === 1 ? '' : 's'} jugado${t.played === 1 ? '' : 's'}</div>
         <div class="actions">
           <button class="btn small primary" data-act="open">${r.finished ? 'Ver tarjeta' : 'Continuar'}</button>
-          ${r.finished ? '<button class="btn small" data-act="edit">Editar golpes</button>' : '<button class="btn small" data-act="card">Tarjeta</button>'}
+          ${isImported(r) ? '' : r.finished ? '<button class="btn small" data-act="edit">Editar golpes</button>' : '<button class="btn small" data-act="card">Tarjeta</button>'}
           <button class="btn small danger" data-act="del">Borrar</button>
         </div></div>`;
     }).join('');
@@ -685,7 +697,7 @@
             return;
           }
           round = r;
-          if (act === 'open' && r.finished) renderCard();
+          if ((act === 'open' && r.finished) || isImported(r)) renderCard();
           else if (act === 'card') renderCard();
           else openHole(Math.min(r.cur || 0, r.holes.length - 1));
         };
@@ -710,6 +722,10 @@
   }
 
   function openHole(idx) {
+    if (isImported(round)) {
+      renderCard();
+      return;
+    }
     round.cur = idx;
     Object.assign(ui, {
       editIndex: null, moveIndex: null, pendingDrop: false, cam: null, loupe: null, ghost: null,
@@ -1870,9 +1886,9 @@
       if (played) {
         section.par += st.par;
         section.strokes += st.strokes;
-        section.putts += st.putts;
+        section.putts += st.putts || 0;
         if (st.fairway != null) { fwTot++; if (st.fairway) fwHit++; }
-        if (st.done) { girTot++; if (st.gir) girHit++; puttHoles++; }
+        if (st.done && st.gir != null) { girTot++; if (st.gir) girHit++; puttHoles++; }
         pens += st.pens;
       } else {
         section.par += st.par;
@@ -1880,9 +1896,9 @@
       const tint = st.done ? (st.strokes < st.par ? ' t-under' : st.strokes > st.par ? ' t-over' : '') : '';
       rows.push(`<tr class="link${tint}" data-i="${i}"><td>${n}</td><td>${st.par}</td>
         <td>${played ? mark(st.strokes, st.par) + (st.done ? '' : '<span class="muted">…</span>') : '–'}</td>
-        <td>${played ? st.putts : '–'}</td>
+        <td>${played && st.putts != null ? st.putts : '–'}</td>
         <td>${st.fairway == null ? '<span class="muted">·</span>' : st.fairway ? '<span class="yes">✓</span>' : '<span class="no">✗</span>'}</td>
-        <td>${!st.done ? '<span class="muted">·</span>' : st.gir ? '<span class="yes">✓</span>' : '<span class="no">✗</span>'}</td></tr>`);
+        <td>${!st.done || st.gir == null ? '<span class="muted">·</span>' : st.gir ? '<span class="yes">✓</span>' : '<span class="no">✗</span>'}</td></tr>`);
       const endOfNine = n === 9 || i === round.holes.length - 1;
       if (endOfNine) {
         rows.push(subRow(n <= 9 ? 'Ida' : 'Vuelta', section));
@@ -1904,37 +1920,56 @@
     }).join('');
     const tee = TEES.find((x) => x[0] === round.tees);
     const pct = (a, b) => (b ? Math.round((100 * a) / b) + ' %' : '–');
+    const card = isImported(round);
+    const official = round.official || {};
+    let better = 0;
+    let worse = 0;
+    for (const n of round.holes) {
+      const st = holeStats(n);
+      if (!st.started) continue;
+      if (st.strokes < st.par) better++;
+      if (st.strokes >= st.par + 2) worse++;
+    }
+    const missing = round.holes.filter((n) => !holeStats(n).started).length;
+    const stats = card ? `
+        <div class="stat"><div class="k">Stableford</div><div class="v num">${official.stableford ?? '–'}</div><div class="s">puntos oficiales</div></div>
+        <div class="stat"><div class="k">Hándicap de juego</div><div class="v num">${official.playingHcp ?? '–'}</div><div class="s">${official.index != null ? `índice ${String(official.index).replace('.', ',')}` : 'en esta prueba'}</div></div>
+        <div class="stat"><div class="k">Birdies o mejor</div><div class="v num">${better}</div><div class="s">hoyos bajo par</div></div>
+        <div class="stat"><div class="k">Dobles o peor</div><div class="v num">${worse}</div><div class="s">hoyos +2 o más</div></div>`
+      : `
+        <div class="stat"><div class="k">Putts</div><div class="v num">${sum.putts || 0}</div><div class="s">${puttHoles ? (sum.putts / puttHoles).toFixed(1).replace('.', ',') + ' por hoyo' : '–'}</div></div>
+        <div class="stat"><div class="k">Calles cogidas</div><div class="v num">${pct(fwHit, fwTot)}</div><div class="s">${fwHit}/${fwTot} (pares 4 y 5)</div></div>
+        <div class="stat"><div class="k">Greens en regulación</div><div class="v num">${pct(girHit, girTot)}</div><div class="s">${girHit}/${girTot} hoyos</div></div>
+        <div class="stat"><div class="k">Penalizaciones</div><div class="v num">${pens}</div><div class="s">golpes</div></div>`;
 
     app.innerHTML = `
       <div class="page-head">
         <div><span class="eyebrow">Tarjeta · Golf Sotoverde</span><h1 class="h-display">${esc(fmtDate(round.date))}</h1>
-          <div class="sub">Barras ${tee ? tee[1].toLowerCase() : round.tees} · ${round.finished ? 'vuelta terminada' : 'vuelta en curso'}</div></div>
+          <div class="sub">${card ? `${esc(round.event || 'Competición')} · ` : ''}Barras ${tee ? tee[1].toLowerCase() : round.tees} · ${card ? `tarjeta oficial${official.gross ? ` · bruto ${official.gross}` : ''}` : round.finished ? 'vuelta terminada' : 'vuelta en curso'}</div></div>
         <div class="big-score num${t.diff < 0 ? ' under' : ''}">${t.played ? t.strokes : '–'}<small>${t.played ? signed(t.diff) : ''}</small></div>
       </div>
       <div class="row" style="margin:14px 0">
         <button class="btn" id="home">‹ Vueltas</button>
-        <button class="btn primary" id="resume">${round.finished ? 'Editar golpes' : 'Seguir apuntando'}</button>
+        ${card ? '' : `<button class="btn primary" id="resume">${round.finished ? 'Editar golpes' : 'Seguir apuntando'}</button>`}
       </div>
       <div class="table-scroll"><table class="score">
         <thead><tr><th>Hoyo</th><th>Par</th><th>Golpes</th><th>Putts</th><th>Calle</th><th>Green reg.</th></tr></thead>
         <tbody>${rows.join('')}</tbody></table></div>
       <p class="legend"><span><span class="mark birdie">3</span> birdie</span><span><span class="mark eagle">2</span> eagle o mejor</span>
         <span><span class="mark bogey">5</span> bogey</span><span><span class="mark double">6</span> doble o peor</span></p>
+      ${card ? `<p class="legend">Importada de la tarjeta oficial: solo golpes por hoyo, sin putts ni golpes en el mapa.${missing ? ` ${missing} hoyo${missing === 1 ? '' : 's'} sin resultado en la tarjeta (–).` : ''}${round.pars ? ' Prueba de pitch & putt: todos los hoyos par 3.' : ''}</p>` : ''}
 
       <h2 class="section-title">Estadísticas</h2>
-      <div class="stats">
-        <div class="stat"><div class="k">Putts</div><div class="v num">${sum.putts || 0}</div><div class="s">${puttHoles ? (sum.putts / puttHoles).toFixed(1).replace('.', ',') + ' por hoyo' : '–'}</div></div>
-        <div class="stat"><div class="k">Calles cogidas</div><div class="v num">${pct(fwHit, fwTot)}</div><div class="s">${fwHit}/${fwTot} (pares 4 y 5)</div></div>
-        <div class="stat"><div class="k">Greens en regulación</div><div class="v num">${pct(girHit, girTot)}</div><div class="s">${girHit}/${girTot} hoyos</div></div>
-        <div class="stat"><div class="k">Penalizaciones</div><div class="v num">${pens}</div><div class="s">golpes</div></div>
+      <div class="stats">${stats}
       </div>
 
-      <h2 class="section-title">Distancias por palo</h2>
+      ${card ? '' : '<h2 class="section-title">Distancias por palo</h2>'}
       ${clubRows ? `<div class="table-scroll"><table class="score"><thead><tr><th>Palo</th><th>Golpes</th><th>Media</th><th>Máx.</th><th>Vuelo trazado</th></tr></thead><tbody>${clubRows}</tbody></table></div>
         <p class="legend">Distancia en línea recta de donde salió a donde quedó la bola (con rodada); no cuenta bolas al agua o fuera.</p>`
-        : '<p class="empty">Apunta golpes en el mapa para ver tus distancias por palo.</p>'}
+        : card ? '' : '<p class="empty">Apunta golpes en el mapa para ver tus distancias por palo.</p>'}
       <p class="foot"><a href="jugar.html">Modo juego</a></p>`;
     app.querySelector('#home').onclick = renderHome;
+    if (card) return;
     app.querySelector('#resume').onclick = () => {
       const i = round.holes.findIndex((m) => !(round.scores[m] && round.scores[m].done));
       openHole(i >= 0 ? i : 0);
