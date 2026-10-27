@@ -420,3 +420,28 @@ table.score tr.link { cursor: pointer; }
 }
 table.score tr.t-under td { background: rgba(31, 122, 69, 0.08); }
 table.score tr.t-over td { background: rgba(200, 50, 42, 0.06); }
+
+/* ---------- resumen en 3D ---------- */
+.replay-modal {
+  position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
+  padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  background: rgba(6, 18, 11, 0.9);
+}
+.replay-modal .tour { width: min(1180px, 100%); height: min(88vh, 780px); aspect-ratio: auto; min-height: 0; }
+.replay-close {
+  position: absolute; z-index: 61; top: max(20px, calc(env(safe-area-inset-top, 0px) + 8px)); right: max(20px, calc(env(safe-area-inset-right, 0px) + 8px));
+  width: 44px; height: 44px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.92); color: var(--pine);
+  font: 700 18px/1 var(--font-body); cursor: pointer; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+.tour.replay .tour-play { top: 18px; left: 18px; right: auto; }
+.tour.in-play .tour-cap .t-title { font-size: clamp(28px, 6vw, 44px); }
+@media (max-width: 600px) {
+  .replay-modal { padding: 0; }
+  .replay-modal .tour { width: 100%; height: 100%; border-radius: 0; }
+}
+.mini3d {
+  margin-left: 8px; padding: 3px 7px; border: 1px solid var(--stone); border-radius: 999px; background: var(--white);
+  font: 700 11px/1 var(--font-body); letter-spacing: 0.04em; color: var(--emerald); cursor: pointer; vertical-align: 3px;
+}
+.mini3d:hover { background: var(--mist); }
+.play3d { display: inline-block; width: 0; height: 0; margin-right: 8px; border-style: solid; border-width: 6px 0 6px 10px; border-color: transparent transparent transparent currentColor; vertical-align: -1px; }

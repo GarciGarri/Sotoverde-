@@ -1513,6 +1513,7 @@
     const pos = positions(n);
     if (hs.done) {
       action = `<div class="action"><button class="btn" id="reopen">Reabrir</button>
+        ${GC.Tour && GC.COURSE_3D ? '<button class="btn" id="hole3d">Ver en 3D</button>' : ''}
         <button class="btn primary" id="next2"><span>${idx < round.holes.length - 1 ? 'Siguiente hoyo' : 'Ver tarjeta'}<small>${GC.scoreName(st.strokes, st.par)} · ${golpes(st.strokes)}</small></span></button></div>`;
     } else if (ui.ghost) {
       const from = ui.moveIndex != null ? pos[ui.moveIndex] : pos[pos.length - 1];
@@ -1675,6 +1676,7 @@
       ui.selectedClub = suggestClub(n);
       afterChange();
     };
+    if ($s('#hole3d')) $s('#hole3d').onclick = () => open3D(replayData(round, n));
     if ($s('#next2')) $s('#next2').onclick = () => (idx < round.holes.length - 1 ? openHole(idx + 1) : renderCard());
     const tb = $s('#target-btn');
     if (tb) tb.onclick = () => {
@@ -1896,10 +1898,12 @@
   function renderCard() {
     view = 'card';
     teardownMap();
+    window.scrollTo(0, 0);
     app.className = 'wrap';
     const card = isImported(round);
     // columnas de putts, calle y green solo si hay golpes apuntados en el mapa
     const cols = !card || round.holes.some((n) => liveStrokes(round.scores[n]));
+    const has3d = !!(GC.Tour && GC.COURSE_3D);
     const t = totals();
     const rows = [];
     const sum = { par: 0, strokes: 0, putts: 0 };
@@ -1926,7 +1930,7 @@
       }
       const ks = st.cardStrokes;
       const tint = st.cardDone ? (ks < st.par ? ' t-under' : ks > st.par ? ' t-over' : '') : '';
-      rows.push(`<tr class="link${tint}" data-i="${i}"><td>${n}</td><td>${st.par}</td>
+      rows.push(`<tr class="link${tint}" data-i="${i}"><td>${n}${played && has3d ? `<button class="mini3d" data-n="${n}" aria-label="Ver el hoyo ${n} en 3D">3D</button>` : ''}</td><td>${st.par}</td>
         <td>${card && cardEdit && !st.detailed
           ? `<span class="stepper sm"><button data-h="${n}" data-d="-1" aria-label="Quitar un golpe en el hoyo ${n}">−</button><span class="val">${played ? mark(ks, st.par) : '–'}</span><button data-h="${n}" data-d="1" aria-label="${played ? 'Añadir un golpe' : 'Poner resultado'} en el hoyo ${n}">+</button></span>`
           : played ? mark(ks, st.par) + (st.cardDone ? '' : '<span class="muted">…</span>') + (card && cardEdit ? ' <span class="muted">en el mapa</span>' : '') : '–'}</td>
@@ -1983,6 +1987,7 @@
       </div>
       <div class="row" style="margin:14px 0">
         <button class="btn" id="home">‹ Vueltas</button>
+        ${has3d && t.played ? '<button class="btn" id="replay3d"><span class="play3d" aria-hidden="true"></span>Resumen 3D</button>' : ''}
         ${card ? `<button class="btn primary" id="edit-card">${cardEdit ? 'Hecho' : 'Editar golpes'}</button>` : `<button class="btn primary" id="resume">${round.finished ? 'Editar golpes' : 'Seguir apuntando'}</button>`}
       </div>
       <div class="table-scroll"><table class="score">
@@ -2002,6 +2007,11 @@
         : card ? '' : '<p class="empty">Apunta golpes en el mapa para ver tus distancias por palo.</p>'}
       <p class="foot"><a href="jugar.html">Modo juego</a></p>`;
     app.querySelector('#home').onclick = renderHome;
+    if (app.querySelector('#replay3d')) app.querySelector('#replay3d').onclick = () => open3D(replayData(round));
+    app.querySelectorAll('.mini3d').forEach((b) => (b.onclick = (e) => {
+      e.stopPropagation();
+      open3D(replayData(round, Number(b.dataset.n)));
+    }));
     if (card) {
       app.querySelector('#edit-card').onclick = () => {
         cardEdit = !cardEdit;
@@ -2020,6 +2030,166 @@
       openHole(i >= 0 ? i : 0);
     };
     app.querySelectorAll('tr.link').forEach((tr) => (tr.onclick = () => openHole(Number(tr.dataset.i))));
+  }
+
+  // ---------- resumen en 3D ----------
+
+  const LIE_FROM = { tee: 'Desde el tee', fairway: 'Desde la calle', rough: 'Desde el rough', sand: 'Desde el búnker',
+    green: 'Desde el green', water: 'Desde el agua', ob: 'Desde fuera' };
+  const LIE_TO = { tee: 'al tee', fairway: 'a la calle', rough: 'al rough', sand: 'al búnker', green: 'al green',
+    water: 'al agua', ob: 'fuera de límites' };
+  const cap1 = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+
+  // Golpes de un hoyo explicados, con las posiciones en metros del hoyo (para GC.Tour.replay).
+  function replayHole(n) {
+    const hs = round.scores[n];
+    const total = strokesOf(hs);
+    if (!total) return null;
+    const h = holeData(n);
+    const st = holeStats(n);
+    const par = st.par;
+    const pos = positions(n);
+    const steps = [];
+    let k = 0;
+    let lie = 'tee';
+    hs.entries.forEach((e, i) => {
+      const A = pos[i];
+      const B = pos[i + 1];
+      k++;
+      if (e.t === 's') {
+        const d = GC.dist(A, B);
+        const left = GC.dist(B, h.pin);
+        const dz = h.heightAt(B.x, B.y) - h.heightAt(A.x, A.y);
+        const chips = [lieName(e.l)];
+        if (e.f) chips.push(`Vuelo ${shapeName(e.f).toLowerCase()}`);
+        if (Math.abs(dz) >= 2) chips.push(`${dz > 0 ? 'Sube' : 'Baja'} ${Math.abs(dz).toFixed(0)} m`);
+        const holed = hs.done && i === hs.entries.length - 1 && !hs.putts && left < 3;
+        let tip = '';
+        if (e.l === 'water' || e.l === 'ob') tip = 'Penalización: un golpe más y a dropar.';
+        else if (holed) tip = '¡Embocada desde fuera del green!';
+        else if (e.l === 'green' && k <= par - 2) tip = 'Green en regulación.';
+        steps.push({
+          kind: 'shot', from: A, to: B, path: e.p || null, lie: e.l,
+          cap: {
+            eyebrow: `Hoyo ${n} · golpe ${k}`,
+            title: `${clubName(e.c)} · ${Math.round(d)} m`,
+            line: `${LIE_FROM[lie] || 'Desde ' + lieName(lie).toLowerCase()} ${LIE_TO[e.l] || lieName(e.l).toLowerCase()}${holed ? ' · dentro' : ` · quedan ${Math.round(left)} m`}`,
+            chips, tip,
+          },
+        });
+        lie = e.l;
+      } else {
+        const dropped = e.x != null;
+        lie = dropped ? detectLie(h, B.x, B.y) : lie;
+        steps.push({
+          kind: 'drop', from: A, to: B, lie,
+          cap: {
+            eyebrow: `Hoyo ${n} · golpe ${k}`, title: 'Penalización',
+            line: `+1 golpe${dropped ? ` · drop en ${lieName(lie).toLowerCase()} a ${Math.round(GC.dist(B, h.pin))} m de la bandera` : ''}`,
+            chips: [], tip: '',
+          },
+        });
+      }
+    });
+    if (hs.putts) {
+      const L = pos[pos.length - 1];
+      steps.push({
+        kind: 'putts', from: L, to: h.pin, lie: 'green',
+        cap: {
+          eyebrow: `Hoyo ${n} · en el green`,
+          title: `${hs.putts} putt${hs.putts === 1 ? '' : 's'}`,
+          line: `Desde ${Math.round(GC.dist(L, h.pin))} m${hs.done ? ' · embocada' : ''}`,
+          chips: [], tip: hs.putts >= 3 ? 'Tres putts o más: el green se complicó.' : hs.putts === 1 ? 'Un solo putt.' : '',
+        },
+      });
+    }
+    const card = usesTotal(hs);
+    const strokes = st.cardStrokes;
+    const d = strokes - par;
+    const result = st.cardDone ? cap1(parName(d)) : 'Sin terminar';
+    const chips = [];
+    if (!card && st.fairway != null) chips.push(st.fairway ? 'Calle cogida' : 'Calle fallada');
+    if (!card && st.gir != null) chips.push(st.gir ? 'Green en regulación' : 'Sin green en regulación');
+    if (!card && st.pens) chips.push(`${st.pens} penalización${st.pens > 1 ? 'es' : ''}`);
+    return {
+      n,
+      holed: !!hs.done,
+      header: {
+        eyebrow: `Hoyo ${n} · par ${par}`, title: `Hoyo ${n}`,
+        line: `${h.length} m · ${golpes(strokes)}${st.cardDone ? ` · ${parName(d)}` : ''}`,
+        chips: card ? ['Tarjeta, sin golpes en el mapa'] : [`${golpes(liveStrokes(hs))} apuntados`], tip: '',
+      },
+      end: {
+        eyebrow: `Hoyo ${n} · resultado`, title: result,
+        line: `${golpes(strokes)}${!card && hs.putts ? ` · ${hs.putts} putt${hs.putts === 1 ? '' : 's'}` : ''}${st.cardDone ? ` · ${signed(d)}` : ''}`,
+        chips, tip: card ? 'Apunta los golpes en el mapa para verlos dibujados.' : '',
+      },
+      steps: card ? [] : steps,
+    };
+  }
+
+  // Resumen de la vuelta (o de un hoyo) para el visor 3D.
+  function replayData(r, only) {
+    const saved = round;
+    round = r;
+    try {
+      const holes = r.holes.filter((n) => only == null || n === only).map(replayHole).filter(Boolean);
+      if (only != null) return { holes };
+      const t = totals(r);
+      const tally = { birdie: 0, par: 0, bogey: 0, double: 0 };
+      let putts = 0;
+      let best = null;
+      let worst = null;
+      for (const hd of holes) {
+        const st = holeStats(hd.n);
+        if (!st.cardDone) continue;
+        const d = st.cardStrokes - st.par;
+        tally[d < 0 ? 'birdie' : d === 0 ? 'par' : d === 1 ? 'bogey' : 'double']++;
+        putts += st.putts || 0;
+        if (!best || d < best.d) best = { n: hd.n, d };
+        if (!worst || d > worst.d) worst = { n: hd.n, d };
+      }
+      const chips = [];
+      if (tally.birdie) chips.push(`${tally.birdie} bajo par`);
+      chips.push(`${tally.par} par${tally.par === 1 ? '' : 'es'}`);
+      if (tally.bogey) chips.push(`${tally.bogey} bogey${tally.bogey === 1 ? '' : 's'}`);
+      if (tally.double) chips.push(`${tally.double} doble${tally.double === 1 ? '' : 's'} o peor`);
+      if (putts) chips.push(`${putts} putts`);
+      const tip = best ? `Mejor hoyo: el ${best.n} (${parName(best.d)}).${worst && worst.d > best.d ? ` El que más costó: el ${worst.n} (${parName(worst.d)}).` : ''}` : '';
+      return {
+        intro: {
+          eyebrow: `Resumen de la vuelta${r.event ? ' · ' + esc(r.event) : ''}`, title: esc(fmtDate(r.date)),
+          line: `${golpes(t.strokes)} · ${signed(t.diff)} al par · ${t.played} hoyo${t.played === 1 ? '' : 's'}`, chips, tip: '',
+        },
+        outro: { eyebrow: 'Final de la vuelta', title: `${golpes(t.strokes)} · ${signed(t.diff)}`, line: esc(fmtDate(r.date)), chips, tip },
+        holes,
+      };
+    } finally {
+      round = saved;
+    }
+  }
+
+  // Visor a pantalla completa; se cierra con ✕ o Escape y libera la escena.
+  function open3D(data) {
+    if (!data.holes.length) {
+      toast('No hay hoyos jugados para ver en 3D.');
+      return;
+    }
+    const modal = document.createElement('div');
+    modal.className = 'replay-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', 'Resumen en 3D');
+    modal.innerHTML = '<div class="tour replay" id="replay"></div><button class="replay-close" aria-label="Cerrar">✕</button>';
+    document.body.appendChild(modal);
+    const player = GC.Tour.replay(modal.querySelector('#replay'), data, { autoplay: true, button: data.intro ? 'Resumen 3D' : 'Hoyo en 3D' });
+    const close = () => {
+      GC.Tour.dispose(player);
+      modal.remove();
+      document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    modal.querySelector('.replay-close').onclick = close;
   }
 
   // ---------- utilidades ----------

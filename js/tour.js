@@ -29,7 +29,9 @@
 
   // ---------- datos del campo en coordenadas del recorrido (metros, x este, y sur desde la esquina NO) ----------
 
+  let modelCache = null;
   function courseModel() {
+    if (modelCache) return modelCache;
     const C = GC.COURSE_3D;
     const [X0, Y1] = C.origin;
     const D = C.dem;
@@ -53,6 +55,7 @@
     });
     const model = { C, heightAt, holes, base: Math.min(...heights), width: C.size[0], depth: C.size[1] };
     model.club = clubStops(model);
+    modelCache = model;
     return model;
   }
 
@@ -230,26 +233,46 @@
   function mount(container, opts = {}) {
     const model = courseModel();
     const { segs, duration } = segments(model);
-    const player = { container, model, segs, duration, playing: false, t: 0, onEnd: opts.onEnd };
+    return makePlayer(container, model, segs, duration, {
+      ...opts, button: 'Recorrido 3D', sub: `${Math.round(duration / 60)} min · 18 hoyos`, first: intro(model),
+    });
+  }
+
+  function makePlayer(container, model, segs, duration, opts) {
+    const player = { container, model, segs, duration, playing: false, t: 0, onEnd: opts.onEnd, data: opts.data || null };
+    const bar = segs.filter((s) => s.kind !== 'outro' && s.kind !== 'routro');
     container.innerHTML = `
       <canvas class="tour-poster" aria-hidden="true"></canvas>
       <div class="tour-gl"></div>
       <div class="tour-shade"></div>
       <div class="tour-cap" aria-live="polite"></div>
-      <button class="tour-play" aria-label="Ver el recorrido en 3D"><span class="tri"></span><b>Recorrido 3D</b><small>${Math.round(duration / 60)} min · 18 hoyos</small></button>
+      <button class="tour-play" aria-label="Reproducir: ${opts.button}"><span class="tri"></span><b>${opts.button}</b><small>${opts.sub}</small></button>
       <div class="tour-bar" hidden>
         <button class="tb" data-a="prev" aria-label="Tramo anterior">‹‹</button>
         <button class="tb" data-a="toggle" aria-label="Pausa">❚❚</button>
         <button class="tb" data-a="next" aria-label="Tramo siguiente">››</button>
         <div class="tour-prog" role="slider" aria-label="Progreso del recorrido" aria-valuemin="0" aria-valuemax="100">${
-          segs.slice(0, -1).map((s, i) => `<span data-seg="${i}" class="k-${s.kind}" title="${s.title}"><i></i></span>`).join('')}</div>
+          bar.map((s, i) => `<span data-seg="${i}" class="k-${s.kind}" title="${s.title}"><i></i></span>`).join('')}</div>
       </div>`;
     drawPoster(player);
     container.querySelector('.tour-play').onclick = () => start(player);
     container.querySelectorAll('.tour-bar .tb').forEach((b) => (b.onclick = () => action(player, b.dataset.a)));
     container.querySelectorAll('.tour-prog span').forEach((s) => (s.onclick = () => seekSeg(player, Number(s.dataset.seg))));
-    caption(player, intro(model));
+    caption(player, opts.first);
+    if (opts.autoplay) start(player);
     return player;
+  }
+
+  // Libera la escena WebGL (los navegadores limitan cuántos contextos puede haber a la vez).
+  function dispose(player) {
+    player.playing = false;
+    player.disposed = true;
+    if (!player.three) return;
+    player.three.ro.disconnect();
+    player.three.renderer.dispose();
+    player.three.renderer.forceContextLoss();
+    player.three.renderer.domElement.remove();
+    player.three = null;
   }
 
   function intro(model) {
@@ -495,8 +518,15 @@
       labels.pois.push(sp);
     }
 
-    player.three = { renderer, scene, camera, labels, water: waterMat };
     const ro = new ResizeObserver(() => resize(player));
+    player.three = { renderer, scene, camera, labels, water: waterMat, ro };
+    if (player.data) {
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.6, 14, 10), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      ball.visible = false;
+      scene.add(ball);
+      player.three.ball = ball;
+      player.three.groups = new Map();
+    }
     ro.observe(player.container);
     resize(player);
   }
@@ -560,7 +590,7 @@
   }
 
   // Etiqueta siempre de cara a la cámara: número de hoyo (círculo) o nombre de una instalación (píldora).
-  function textSprite(THREE, text, { round }) {
+  function textSprite(THREE, text, { round, size }) {
     const c = document.createElement('canvas');
     const g = c.getContext('2d');
     const font = round ? "800 66px 'Barlow Condensed', 'Arial Narrow', sans-serif" : "700 44px 'Barlow', system-ui, sans-serif";
@@ -591,7 +621,7 @@
     const tex = new THREE.CanvasTexture(c);
     tex.encoding = THREE.sRGBEncoding;
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-    const k = round ? 7 / 128 : 6.5 / 76;
+    const k = round ? (size || 7) / 128 : 6.5 / 76;
     sp.scale.set(c.width * k, c.height * k, 1);
     sp.renderOrder = 10;
     return sp;
@@ -624,6 +654,9 @@
     const THREE = global.THREE;
     const { model, W } = player;
     const { seg, s, k } = segmentAt(player, t);
+    if (s.kind === 'play') return replayCam(player, seg, s, t - s.t0);
+    if (s.kind === 'rintro') return replayOverview(player, seg, s.holes, k, true);
+    if (s.kind === 'routro') return replayOverview(player, seg, s.holes, k, false);
     if (s.kind === 'intro' || s.kind === 'outro') {
       // vuelo alrededor del campo
       const center = new THREE.Vector3(0, 12, 20);
@@ -675,8 +708,10 @@
     }
     player.lastT = player.t;
     const kind = player.segs[s.seg].kind;
-    labels.pois.forEach((l) => (l.visible = kind !== 'hole'));
-    labels.holes.forEach((l) => (l.visible = kind !== 'club'));
+    labels.pois.forEach((l) => (l.visible = kind === 'intro' || kind === 'club' || kind === 'outro'));
+    const only = kind === 'play' ? player.model.holes.indexOf(player.segs[s.seg].ho) : -1;
+    labels.holes.forEach((l, i) => (l.visible = kind !== 'club' && (only < 0 || i === only)));
+    if (player.data) drawReplay(player, s);
     camera.position.copy(player.camPos);
     camera.lookAt(player.camLook);
     renderer.render(scene, camera);
@@ -684,7 +719,7 @@
   }
 
   function loop(player) {
-    if (!player.playing) return;
+    if (!player.playing || player.disposed) return;
     if (!player.container.isConnected) {
       // se ha salido de la portada: queda en pausa
       player.playing = false;
@@ -714,6 +749,8 @@
     if (player.uiKey !== key) {
       player.uiKey = key;
       if (s.kind === 'intro') caption(player, intro(player.model));
+      else if (s.kind === 'rintro' || s.kind === 'routro') caption(player, s.cap);
+      else if (s.kind === 'play') caption(player, s.steps[sub].cap);
       else if (s.kind === 'club') caption(player, player.model.club[sub].cap);
       else if (s.kind === 'outro') caption(player, {
         eyebrow: 'Golf Sotoverde', title: 'Buena vuelta', line: 'Apunta tus golpes hoyo a hoyo con Mis vueltas',
@@ -732,6 +769,7 @@
       }
     }
     const k = GC.clamp((player.t - s.t0) / s.dur, 0, 1);
+    c.classList.toggle('in-play', s.kind === 'play');
     c.querySelectorAll('.tour-prog span').forEach((el, idx) => {
       const fill = idx < seg ? 1 : idx === seg ? k : 0;
       el.firstChild.style.transform = `scaleX(${fill})`;
@@ -783,5 +821,216 @@
     else if (a === 'prev') seekSeg(player, seg - 1);
   }
 
-  GC.Tour = { mount, holeInfo, courseModel };
+  // ---------- repetición de una vuelta o de un hoyo, con los golpes dibujados ----------
+
+  const RP = { rintro: 5.5, approach: 2.4, shot: 3.2, drop: 2.2, putts: 2.8, end: 3, card: 5, routro: 5.5 };
+  const LIE_COLOR = { fairway: 0xffffff, rough: 0xf0d77a, sand: 0xf6e7b6, green: 0xb9f58f, water: 0x4aa8e8, ob: 0xff5a45, tee: 0xffffff };
+
+  /*
+   * data: { intro?, outro?: caption, holes: [{ n, header, end: caption, steps: [{ kind: 'shot'|'drop'|'putts',
+   *   from, to, path?, lie?, cap }] }] } con los puntos en metros del hoyo (como en campos/*.json).
+   */
+  function replay(container, data, opts = {}) {
+    const model = courseModel();
+    const segs = [];
+    const holes = [];
+    data.holes.forEach((hd) => {
+      const ho = model.holes.find((x) => x.raw.number === hd.n);
+      if (!ho) return;
+      holes.push(ho);
+      const steps = [{ kind: 'approach', dur: RP.approach, cap: hd.header }];
+      hd.steps.forEach((st) => steps.push({
+        ...st, dur: RP[st.kind], A: ho.to(st.from), B: ho.to(st.to), P: st.path && st.path.length > 1 ? st.path.map(ho.to) : null,
+      }));
+      steps.push({ kind: 'end', dur: hd.steps.length ? RP.end : RP.card, cap: hd.end });
+      let t = 0;
+      steps.forEach((st) => {
+        st.t0 = t;
+        t += st.dur;
+      });
+      segs.push({ kind: 'play', ho, hd, steps, dur: t, title: `Hoyo ${hd.n}` });
+    });
+    if (data.intro) segs.unshift({ kind: 'rintro', dur: RP.rintro, cap: data.intro, holes, title: 'Resumen' });
+    if (data.outro) segs.push({ kind: 'routro', dur: RP.routro, cap: data.outro, holes, title: 'Final' });
+    let t = 0;
+    segs.forEach((s) => {
+      s.t0 = t;
+      t += s.dur;
+    });
+    const mins = t / 60;
+    return makePlayer(container, model, segs, t, {
+      ...opts, data, button: opts.button || 'Resumen 3D',
+      sub: `${mins < 1 ? `${Math.round(t)} s` : `${Math.round(mins)} min`} · ${holes.length} hoyo${holes.length === 1 ? '' : 's'}`,
+      first: data.intro || (segs[0] && segs[0].steps ? segs[0].steps[0].cap : { eyebrow: '', title: '', line: '', chips: [] }),
+    });
+  }
+
+  // Trayectoria en 3D: la línea trazada (o recta) en planta y una parábola encima; los putts van por el suelo.
+  function flightCurve(player, st, putt) {
+    const THREE = global.THREE;
+    const { W } = player;
+    const n = 48;
+    let plan;
+    if (st.P) {
+      // repartir la línea trazada en n puntos por longitud, empezando y acabando en la bola
+      const pts = [st.A].concat(st.P, [st.B]);
+      const cum = [0];
+      for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + GC.dist(pts[i - 1], pts[i]));
+      const L = cum[cum.length - 1] || 1;
+      plan = [];
+      for (let i = 0, j = 0; i < n; i++) {
+        const d = (L * i) / (n - 1);
+        while (j < pts.length - 2 && cum[j + 1] < d) j++;
+        const f = (d - cum[j]) / (cum[j + 1] - cum[j] || 1);
+        plan.push({ x: pts[j].x + (pts[j + 1].x - pts[j].x) * f, y: pts[j].y + (pts[j + 1].y - pts[j].y) * f });
+      }
+    } else {
+      plan = Array.from({ length: n }, (_, i) => ({ x: st.A.x + ((st.B.x - st.A.x) * i) / (n - 1), y: st.A.y + ((st.B.y - st.A.y) * i) / (n - 1) }));
+    }
+    const d = GC.dist(st.A, st.B);
+    const apex = putt ? 0 : d < 35 ? Math.max(1.5, d * 0.22) : Math.min(34, 6 + d * 0.13);
+    const ya = W(st.A.x, st.A.y).y;
+    const yb = W(st.B.x, st.B.y).y;
+    return plan.map((p, i) => {
+      const t = i / (n - 1);
+      const tt = t < 0.6 ? (t / 0.6) * 0.5 : 0.5 + ((t - 0.6) / 0.4) * 0.5; // el vértice, algo pasada la mitad
+      const ground = W(p.x, p.y).y;
+      const y = putt ? ground + 0.25 : Math.max(ground + 0.3, ya + (yb - ya) * t + apex * Math.sin(Math.PI * tt));
+      return new THREE.Vector3(W(p.x, p.y).x, y, W(p.x, p.y).z);
+    });
+  }
+
+  function replayGroup(player, seg) {
+    const THREE = global.THREE;
+    const { scene, groups } = player.three;
+    if (groups.has(seg)) return groups.get(seg);
+    const s = player.segs[seg];
+    const group = new THREE.Group();
+    let k = 0;
+    const items = s.steps.map((st) => {
+      if (st.kind !== 'shot' && st.kind !== 'drop' && st.kind !== 'putts') return null;
+      if (st.kind !== 'putts') k++;
+      const putt = st.kind === 'putts';
+      const pts = st.kind === 'drop' ? [player.W(st.A.x, st.A.y, 0.4), player.W(st.B.x, st.B.y, 0.4)] : flightCurve(player, st, putt);
+      const it = { pts, tubes: [], marker: null };
+      if (st.kind !== 'drop' && GC.dist(st.A, st.B) > 0.5) {
+        const curve = new THREE.CatmullRomCurve3(pts);
+        const color = putt ? 0xffffff : st.lie === 'water' || st.lie === 'ob' ? 0xff6b55 : 0xfff1a6;
+        for (const [r, op] of putt ? [[0.14, 0.95]] : [[0.32, 0.95], [0.9, 0.22]]) {
+          const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 96, r, 6, false),
+            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, depthWrite: false }));
+          tube.renderOrder = 5;
+          it.tubes.push(tube);
+          group.add(tube);
+        }
+      }
+      if (!putt) {
+        const end = player.W(st.B.x, st.B.y, 0.25);
+        const ring = new THREE.Mesh(new THREE.RingGeometry(1.1, 1.8, 24), new THREE.MeshBasicMaterial({
+          color: LIE_COLOR[st.lie] || 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthWrite: false }));
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.copy(end);
+        const num = textSprite(THREE, String(k), { round: true, size: 3.6 });
+        num.position.copy(end).add(new THREE.Vector3(0, 4.2, 0));
+        it.marker = new THREE.Group();
+        it.marker.add(ring, num);
+        group.add(it.marker);
+      }
+      return it;
+    });
+    scene.add(group);
+    const g = { group, items };
+    groups.set(seg, g);
+    return g;
+  }
+
+  function stepAt(s, lt) {
+    let j = s.steps.findIndex((st) => lt < st.t0 + st.dur);
+    if (j < 0) j = s.steps.length - 1;
+    return { j, st: s.steps[j], k: GC.clamp((lt - s.steps[j].t0) / s.steps[j].dur, 0, 1) };
+  }
+
+  const FLIGHT = 0.55; // parte del tramo en la que vuela la bola; el resto queda a la vista
+
+  function drawReplay(player, sh) {
+    const { groups, ball } = player.three;
+    const s = player.segs[sh.seg];
+    groups.forEach((g, key) => (g.group.visible = key === sh.seg));
+    if (s.kind !== 'play') {
+      ball.visible = false;
+      return;
+    }
+    const g = replayGroup(player, sh.seg);
+    g.group.visible = true;
+    const { j, k } = stepAt(s, player.t - s.t0);
+    s.steps.forEach((st, i) => {
+      const it = g.items[i];
+      if (!it) return;
+      const f = i < j ? 1 : i > j ? 0 : GC.clamp(k / FLIGHT, 0, 1);
+      it.tubes.forEach((tube) => {
+        const n = tube.geometry.index.count;
+        tube.geometry.setDrawRange(0, Math.floor((n * f) / 36) * 36);
+        tube.visible = f > 0;
+      });
+      if (it.marker) it.marker.visible = f >= 1;
+    });
+    // la bola: volando en el golpe actual; si no, donde quedó el último golpe (o en el tee)
+    const cur = s.steps[j];
+    const it = g.items[j];
+    let ballPos = null;
+    if (it && cur.kind === 'drop') ballPos = k < FLIGHT / 2 ? it.pts[0] : it.pts[1];
+    else if (it) {
+      const q = GC.clamp(k / FLIGHT, 0, 1) * (it.pts.length - 1);
+      const a = Math.floor(q);
+      ballPos = it.pts[a].clone().lerp(it.pts[Math.min(it.pts.length - 1, a + 1)], q - a);
+    } else {
+      const prev = s.steps.filter((st, i) => i < j && g.items[i]).pop();
+      const first = s.steps.find((st) => st.A);
+      const p = prev ? prev.B : first ? first.A : null;
+      if (p) ballPos = player.W(p.x, p.y, 0.6);
+    }
+    ball.visible = !!ballPos && !(s.steps[j].kind === 'end' && s.hd.holed);
+    if (ballPos) ball.position.copy(ballPos);
+  }
+
+  function replayCam(player, seg, s, lt) {
+    const { W } = player;
+    const { j, st, k } = stepAt(s, lt);
+    const ho = s.ho;
+    if (st.kind === 'shot' || st.kind === 'drop' || st.kind === 'putts') {
+      const A = st.A;
+      const B = st.kind === 'drop' && GC.dist(st.A, st.B) < 1 ? ho.pin : st.B;
+      const d = Math.max(8, GC.dist(A, B));
+      const u = { x: (B.x - A.x) / d, y: (B.y - A.y) / d };
+      const e = ease(GC.clamp(k / FLIGHT, 0, 1));
+      const back = st.kind === 'putts' ? 24 + d : Math.max(22, d * 0.42);
+      const lift = st.kind === 'putts' ? 14 : 9 + d * 0.2;
+      const side = d * 0.08;
+      const pos = W(A.x - u.x * back - u.y * side, A.y - u.y * back + u.x * side, lift);
+      const lf = 0.35 + 0.65 * e;
+      return { pos, look: W(A.x + (B.x - A.x) * lf, A.y + (B.y - A.y) * lf, 2), seg, sub: j };
+    }
+    // presentación y cierre del hoyo: vista de todo el hoyo desde detrás del tee
+    const L = GC.dist(ho.tee, ho.pin) || 1;
+    const u = { x: (ho.pin.x - ho.tee.x) / L, y: (ho.pin.y - ho.tee.y) / L };
+    const mid = { x: (ho.tee.x + ho.pin.x) / 2, y: (ho.tee.y + ho.pin.y) / 2 };
+    const e = ease(k);
+    const back = st.kind === 'end' ? L * (0.55 - 0.1 * e) + 30 : L * (0.75 - 0.25 * e) + 30;
+    const lift = st.kind === 'end' ? L * 0.55 + 35 : L * (0.5 - 0.15 * e) + 35;
+    const side = st.kind === 'end' ? (L * 0.2 + 15) * (e - 0.5) : 0;
+    const pos = W(mid.x - u.x * back - u.y * side, mid.y - u.y * back + u.x * side, lift);
+    return { pos, look: W(mid.x + u.x * L * 0.08, mid.y + u.y * L * 0.08, 0), seg, sub: j };
+  }
+
+  // Resumen: vuelo alto sobre los hoyos jugados.
+  function replayOverview(player, seg, holes, k, opening) {
+    const pts = holes.flatMap((ho) => [ho.tee, ho.pin]);
+    const c = pts.reduce((a, p) => ({ x: a.x + p.x / pts.length, y: a.y + p.y / pts.length }), { x: 0, y: 0 });
+    const span = Math.max(150, ...pts.map((p) => GC.dist(p, c))) * 1.25;
+    const a = (opening ? -2.0 : -0.6) + k * 0.7;
+    const pos = player.W(c.x + Math.cos(a) * span, c.y + Math.sin(a) * span, span * 0.7);
+    return { pos, look: player.W(c.x, c.y, 0), seg, sub: 0 };
+  }
+
+  GC.Tour = { mount, replay, dispose, holeInfo, courseModel };
 })(typeof window !== 'undefined' ? window : globalThis);
