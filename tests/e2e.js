@@ -234,6 +234,20 @@ async function main() {
     await p.context().close();
   }
 
+  console.log('Mi progreso');
+  {
+    const p = await page({ local: [imported, mapped] });
+    await p.waitForSelector('#progress');
+    await p.click('#progress');
+    await p.waitForSelector('#holes svg');
+    check((await p.locator('#holes g[tabindex]').count()) === 18, 'barra de cada hoyo jugado');
+    check((await p.locator('#club-pick button').count()) >= 2, 'palos con golpes en el mapa para la dispersión');
+    await p.click('#hole-pick button[data-n="3"]');
+    check(/2 golpes apuntados/.test(await p.locator('#shotmap-info').textContent()), 'mapa de golpes del hoyo');
+    check(p.errors.length === 0, 'sin errores');
+    await p.context().close();
+  }
+
   console.log('Resumen 3D y comentarios');
   {
     const p = await page({ local: [mapped], withSample: true });

@@ -801,7 +801,7 @@
         <div><button class="btn primary hero-btn" id="start" ${listLoaded ? '' : 'disabled'}>Empezar vuelta</button></div>
       </div>
 
-      <h2 class="section-title">Tus vueltas <small id="count"></small></h2>
+      <h2 class="section-title">Tus vueltas <small id="count"></small><button class="btn small" id="progress">Mi progreso</button></h2>
       <div class="rounds" id="list"><p class="empty">Cargando tus vueltas…</p></div>
 
       <h2 class="section-title">Mi bolsa <button class="btn small" id="bag">Editar</button></h2>
@@ -813,6 +813,7 @@
     app.querySelectorAll('#f-route button').forEach((b) => (b.onclick = () => { form.route = b.dataset.k; renderHome(); }));
     bindCond(app, form, 'f-', renderHome);
     app.querySelector('#bag').onclick = renderBag;
+    app.querySelector('#progress').onclick = () => renderProgress();
     app.querySelector('#start').onclick = () => {
       round = newRound(form.tees, form.route);
       rounds.unshift(round);
@@ -2255,6 +2256,408 @@
       openHole(i >= 0 ? i : 0);
     };
     app.querySelectorAll('tr.link').forEach((tr) => (tr.onclick = () => openHole(Number(tr.dataset.i))));
+  }
+
+  // ---------- mi progreso ----------
+
+  const SI_OF = (n) => (GC.STROKE_INDEX || {})[n] || 18;
+  const recFor = (h, n) => (h == null ? 0 : Math.floor(h / 18) + (SI_OF(n) <= h % 18 ? 1 : 0));
+
+  // Estadísticas de todas las vueltas. Fuera quedan las pruebas de pitch & putt (otro par) y las de equipos.
+  function progressData(list = rounds) {
+    const usable = list.filter((r) => !r.pars && !(r.official && r.official.team));
+    const byDate = usable.slice().sort((a, b) => a.date.localeCompare(b.date));
+    const hcpOf = (r) => (r.official && r.official.playingHcp != null ? r.official.playingHcp : null);
+    const lastHcp = byDate.map(hcpOf).filter((x) => x != null).pop() ?? null;
+    const trend = [];
+    const holes = {};
+    const tally = (arr) => arr.reduce((t, d) => (t[d < 0 ? 'under' : d === 0 ? 'par' : d === 1 ? 'bogey' : 'double']++, t), { under: 0, par: 0, bogey: 0, double: 0 });
+    const perRound = [];
+    for (const r of byDate) {
+      const hcp = hcpOf(r) ?? lastHcp;
+      const ds = [];
+      let all = r.holes.length === 18;
+      for (const n of r.holes) {
+        const hs = r.scores[n];
+        const k = strokesOf(hs);
+        if (!k || !scoreDone(hs)) {
+          all = false;
+          continue;
+        }
+        const par = parOf(r, n);
+        const rec = r.official && r.official.rec && r.official.rec[n] != null ? r.official.rec[n] : recFor(hcp, n);
+        (holes[n] = holes[n] || []).push({ d: k - par, ex: k - par - rec, k, id: r.id });
+        ds.push(k - par);
+      }
+      if (ds.length) perRound.push({ r, ds });
+      if (all && ds.length === 18) {
+        const t = totals(r);
+        trend.push({ id: r.id, date: r.date, event: r.event || '', strokes: t.strokes, diff: t.diff, stb: r.official ? stablefordOf(r).points : null });
+      }
+    }
+    const recent = perRound.slice(-8).flatMap((x) => x.ds);
+    const before = perRound.slice(0, -8).flatMap((x) => x.ds);
+    const holeRows = COURSE.map((raw) => {
+      const xs = holes[raw.number] || [];
+      const avg = (f) => (xs.length ? xs.reduce((a, x) => a + f(x), 0) / xs.length : null);
+      return { n: raw.number, par: raw.par, si: SI_OF(raw.number), count: xs.length, toPar: avg((x) => x.d), excess: avg((x) => x.ex), t: tally(xs.map((x) => x.d)) };
+    });
+    return { trend, holeRows, recent: tally(recent), before: tally(before), nRecent: recent.length, nBefore: before.length, lastHcp, usable: usable.length, excluded: list.length - usable.length };
+  }
+
+  // Golpes con palo apuntados en el mapa: distancia y desvío lateral respecto a la línea a bandera (+ = derecha).
+  function clubDispersion(list = rounds) {
+    const out = {};
+    for (const r of list) {
+      for (const n of r.holes) {
+        const hs = r.scores && r.scores[n];
+        if (!hs || !hs.entries.length || !byNumber[n]) continue;
+        const pos = withRound(r, () => positions(n));
+        const pin = withRound(r, () => holeData(n).pin);
+        hs.entries.forEach((e, i) => {
+          if (e.t !== 's' || !e.c || e.l === 'water' || e.l === 'ob') return;
+          const A = pos[i];
+          const B = pos[i + 1];
+          const d = GC.dist(A, B);
+          if (d < 8) return;
+          const L = GC.dist(A, pin) || 1;
+          const u = { x: (pin.x - A.x) / L, y: (pin.y - A.y) / L };
+          const vx = B.x - A.x;
+          const vy = B.y - A.y;
+          (out[e.c] = out[e.c] || []).push({ d, along: vx * u.x + vy * u.y, lat: u.x * vy - u.y * vx, n, date: r.date });
+        });
+      }
+    }
+    return out;
+  }
+
+  const quant = (xs, q) => {
+    const a = xs.slice().sort((x, y) => x - y);
+    const i = (a.length - 1) * q;
+    return a[Math.floor(i)] + (a[Math.ceil(i)] - a[Math.floor(i)]) * (i - Math.floor(i));
+  };
+  const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
+  const sgn = (v, dec = 1) => {
+    const r = Number(v.toFixed(dec));
+    return (r > 0 ? '+' : r < 0 ? '−' : '±') + Math.abs(r).toFixed(dec).replace('.', ',');
+  };
+
+  let progressHole = 9;
+  let progressClub = null;
+
+  function renderProgress() {
+    view = 'progress';
+    teardownMap();
+    window.scrollTo(0, 0);
+    app.className = 'wrap';
+    const P = progressData();
+    const disp = clubDispersion();
+    const T = P.trend;
+    const last6 = T.slice(-6);
+    const prev6 = T.slice(-12, -6);
+    const mean = (xs) => (xs.length ? xs.reduce((a, x) => a + x, 0) / xs.length : null);
+    const m6 = mean(last6.map((x) => x.diff));
+    const p6 = mean(prev6.map((x) => x.diff));
+    const best = T.slice().sort((a, b) => a.diff - b.diff)[0];
+    const ranked = P.holeRows.filter((h) => h.count >= 3 && h.excess != null).sort((a, b) => b.excess - a.excess);
+    const worst = ranked.slice(0, 3);
+    const easy = ranked.slice(-3).reverse();
+    const share = (t, n) => `${pct(t.under + t.par, n)} %`;
+    const clubsWith = CLUBS.filter((c) => disp[c.id] && disp[c.id].length);
+    if (!progressClub || !disp[progressClub]) progressClub = clubsWith.length ? clubsWith.slice().sort((a, b) => disp[b.id].length - disp[a.id].length)[0].id : null;
+
+    app.innerHTML = `
+      <div class="page-head"><div><span class="eyebrow">Golf Sotoverde · todas tus vueltas</span><h1 class="h-display">Mi progreso</h1>
+        <div class="sub">${P.usable} vueltas analizadas${P.excluded ? ` · ${P.excluded} fuera (pitch & putt o por equipos)` : ''}</div></div></div>
+      <div class="row" style="margin:14px 0"><button class="btn" id="home">‹ Vueltas</button></div>
+
+      <div class="stats">
+        <div class="stat"><div class="k">Últimas 6 vueltas</div><div class="v num">${m6 == null ? '–' : sgn(m6)}</div><div class="s">${p6 == null ? 'al par, de media' : `${m6 < p6 ? '▼' : m6 > p6 ? '▲' : '='} ${sgn(m6 - p6)} frente a las 6 anteriores`}</div></div>
+        <div class="stat"><div class="k">Mejor vuelta</div><div class="v num">${best ? best.strokes : '–'}</div><div class="s">${best ? `${signed(best.diff)} · ${esc(fmtDate(best.date))}` : 'sin vueltas completas'}</div></div>
+        <div class="stat"><div class="k">Par o mejor</div><div class="v num">${share(P.recent, P.nRecent)}</div><div class="s">de los hoyos en las 8 últimas${P.nBefore ? ` · antes ${share(P.before, P.nBefore)}` : ''}</div></div>
+        <div class="stat"><div class="k">Dobles o peor</div><div class="v num">${pct(P.recent.double, P.nRecent)} %</div><div class="s">en las 8 últimas${P.nBefore ? ` · antes ${pct(P.before.double, P.nBefore)} %` : ''}</div></div>
+      </div>
+
+      <h2 class="section-title">Resultado por vuelta <small>18 hoyos completos, al par</small></h2>
+      <div class="panel viz" id="trend"></div>
+
+      <h2 class="section-title">Hoyo a hoyo <small>golpes de más o de menos frente a lo que te da tu hándicap</small></h2>
+      ${worst.length ? `<p class="viz-note">Te cuestan más de lo esperado: <b>${worst.map((h) => `el ${h.n}`).join(', ')}</b>. Donde mejor juegas para tu hándicap: <b>${easy.map((h) => `el ${h.n}`).join(', ')}</b>.</p>` : ''}
+      <div class="panel viz" id="holes"></div>
+
+      <h2 class="section-title">Mapa de tus golpes</h2>
+      <div class="seg hole-pick" id="hole-pick">${COURSE.map((h) => `<button data-n="${h.number}" aria-pressed="${h.number === progressHole}">${h.number}</button>`).join('')}</div>
+      <div class="shotmap-wrap"><canvas id="shotmap" aria-label="Golpes apuntados en el hoyo ${progressHole}"></canvas><div class="shotmap-info" id="shotmap-info"></div></div>
+
+      <h2 class="section-title">Dispersión por palo <small>golpes apuntados en el mapa</small></h2>
+      ${clubsWith.length ? `<div class="seg" id="club-pick">${clubsWith.map((c) => `<button data-c="${c.id}" aria-pressed="${c.id === progressClub}">${c.name} <small>${disp[c.id].length}</small></button>`).join('')}</div>
+        <div class="panel viz disp" id="disp"></div>`
+        : '<p class="empty">Cuando apuntes golpes en el mapa (o los añadas a tus tarjetas importadas) verás aquí dónde caen tus golpes con cada palo.</p>'}
+      <div class="viz-tip" id="viz-tip" role="status" hidden></div>`;
+    app.querySelector('#home').onclick = renderHome;
+    drawTrend(app.querySelector('#trend'), T);
+    drawHoles(app.querySelector('#holes'), P.holeRows);
+    app.querySelectorAll('#hole-pick button').forEach((b) => (b.onclick = () => {
+      progressHole = Number(b.dataset.n);
+      app.querySelectorAll('#hole-pick button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      drawShotMap(P);
+    }));
+    drawShotMap(P);
+    if (clubsWith.length) {
+      app.querySelectorAll('#club-pick button').forEach((b) => (b.onclick = () => {
+        progressClub = b.dataset.c;
+        app.querySelectorAll('#club-pick button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+        drawDispersion(app.querySelector('#disp'), disp[progressClub], progressClub);
+      }));
+      drawDispersion(app.querySelector('#disp'), disp[progressClub], progressClub);
+    }
+    bindVizTips(app);
+  }
+
+  // Tooltip compartido: cualquier elemento con data-tip (en hover y en foco).
+  function bindVizTips(root) {
+    const tip = root.querySelector('#viz-tip');
+    const show = (el, x, y) => {
+      tip.textContent = '';
+      el.dataset.tip.split('\n').forEach((line, i) => {
+        const d = document.createElement(i ? 'span' : 'b');
+        d.textContent = line;
+        tip.append(d);
+      });
+      tip.hidden = false;
+      const r = tip.getBoundingClientRect();
+      tip.style.left = `${Math.min(window.innerWidth - r.width - 8, Math.max(8, x - r.width / 2))}px`;
+      tip.style.top = `${Math.max(8, y - r.height - 12)}px`;
+    };
+    root.addEventListener('pointermove', (e) => {
+      const el = e.target.closest('[data-tip]');
+      if (el) show(el, e.clientX, e.clientY);
+      else tip.hidden = true;
+    });
+    root.addEventListener('pointerleave', () => (tip.hidden = true));
+    root.addEventListener('focusin', (e) => {
+      const el = e.target.closest('[data-tip]');
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      show(el, r.left + r.width / 2, r.top);
+    });
+    root.addEventListener('focusout', () => (tip.hidden = true));
+  }
+
+  const NS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs, parent) {
+    const el = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    if (parent) parent.append(el);
+    return el;
+  }
+
+  // Evolución: cada vuelta (puntos grises) y la media de las 5 últimas (línea azul). Un solo eje: golpes al par.
+  function drawTrend(box, T) {
+    if (T.length < 2) {
+      box.innerHTML = '<p class="empty">Hacen falta al menos dos vueltas de 18 hoyos completas.</p>';
+      return;
+    }
+    const W = Math.max(300, box.clientWidth - 32);
+    const H = 240;
+    const pad = { l: 34, r: 14, t: 14, b: 26 };
+    const ys = T.map((p) => p.diff);
+    const lo = Math.floor(Math.min(0, ...ys) / 4) * 4;
+    const hi = Math.ceil(Math.max(...ys) / 4) * 4 || 4;
+    const t0 = new Date(T[0].date).getTime();
+    const t1 = new Date(T[T.length - 1].date).getTime();
+    const X = (p) => pad.l + ((new Date(p.date).getTime() - t0) / (t1 - t0 || 1)) * (W - pad.l - pad.r);
+    const Y = (v) => pad.t + ((hi - v) / (hi - lo)) * (H - pad.t - pad.b);
+    box.innerHTML = `<div class="legend"><span><i class="k-dot"></i>Cada vuelta</span><span><i class="k-line"></i>Media de las 5 últimas</span></div>`;
+    const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': 'Resultado al par de cada vuelta y media móvil' }, box);
+    for (let v = lo; v <= hi; v += 4) {
+      svgEl('line', { x1: pad.l, x2: W - pad.r, y1: Y(v), y2: Y(v), class: v === 0 ? 'axis0' : 'grid' }, svg);
+      svgEl('text', { x: pad.l - 6, y: Y(v) + 4, class: 'tick', 'text-anchor': 'end' }, svg).textContent = v === 0 ? 'Par' : (v > 0 ? '+' : '') + v;
+    }
+    const years = [...new Set(T.map((p) => new Date(p.date).getFullYear()))];
+    for (const yr of years) {
+      const x = X({ date: `${yr}-01-01` });
+      if (x >= pad.l && x <= W - pad.r) svgEl('text', { x, y: H - 6, class: 'tick', 'text-anchor': 'middle' }, svg).textContent = yr;
+    }
+    const avg = T.map((p, i) => {
+      const w = T.slice(Math.max(0, i - 4), i + 1);
+      return { ...p, m: w.reduce((a, x) => a + x.diff, 0) / w.length };
+    });
+    svgEl('path', { d: avg.map((p, i) => `${i ? 'L' : 'M'}${X(p).toFixed(1)},${Y(p.m).toFixed(1)}`).join(''), class: 'line' }, svg);
+    T.forEach((p, i) => {
+      const g = svgEl('g', { tabindex: 0, 'data-tip': `${signed(p.diff)} · ${p.strokes} golpes\n${fmtDate(p.date)}${p.event ? ' · ' + p.event : ''}\nMedia de 5: ${sgn(avg[i].m)}` }, svg);
+      svgEl('circle', { cx: X(p), cy: Y(p.diff), r: 12, class: 'hit' }, g);
+      svgEl('circle', { cx: X(p), cy: Y(p.diff), r: 4.5, class: 'dot' }, g);
+    });
+    const lastP = avg[avg.length - 1];
+    svgEl('circle', { cx: X(lastP), cy: Y(lastP.m), r: 5, class: 'end' }, svg);
+    svgEl('text', { x: X(lastP) - 8, y: Y(lastP.m) - 10, class: 'lab', 'text-anchor': 'end' }, svg).textContent = sgn(lastP.m);
+    const tbl = document.createElement('details');
+    tbl.innerHTML = `<summary>Ver como tabla</summary><div class="table-scroll"><table class="score"><thead><tr><th>Fecha</th><th>Prueba</th><th>Golpes</th><th>Al par</th></tr></thead><tbody>${
+      T.slice().reverse().map((p) => `<tr><td>${esc(fmtDate(p.date))}</td><td>${esc(p.event)}</td><td>${p.strokes}</td><td>${signed(p.diff)}</td></tr>`).join('')}</tbody></table></div>`;
+    box.append(tbl);
+  }
+
+  // Hoyo a hoyo: barras divergentes (izquierda azul = mejor de lo que da tu hándicap, derecha roja = peor).
+  function drawHoles(box, rows) {
+    const data = rows.filter((r) => r.count);
+    if (!data.length) {
+      box.innerHTML = '<p class="empty">Aún no hay hoyos terminados.</p>';
+      return;
+    }
+    const W = Math.max(300, box.clientWidth - 32);
+    const rowH = 24;
+    const pad = { l: 64, r: 52, t: 6, b: 6 };
+    const H = pad.t + pad.b + rowH * rows.length;
+    const max = Math.max(0.5, ...data.map((r) => Math.abs(r.excess)));
+    const mid = pad.l + (W - pad.l - pad.r) / 2;
+    const S = (v) => (v / max) * ((W - pad.l - pad.r) / 2 - 40); // deja sitio a la etiqueta en la punta
+    box.innerHTML = '<div class="legend"><span><i class="k-bar under"></i>Mejor de lo esperado</span><span><i class="k-bar over"></i>Peor de lo esperado</span></div>';
+    const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': 'Golpes por encima o por debajo de lo esperado en cada hoyo' }, box);
+    svgEl('line', { x1: mid, x2: mid, y1: pad.t, y2: H - pad.b, class: 'axis0' }, svg);
+    rows.forEach((r, i) => {
+      const y = pad.t + i * rowH;
+      svgEl('text', { x: 4, y: y + rowH / 2 + 4, class: 'tick' }, svg).textContent = `${r.n} · par ${r.par}`;
+      if (!r.count) return;
+      const w = Math.abs(S(r.excess));
+      const x = r.excess < 0 ? mid - w : mid;
+      const g = svgEl('g', {
+        tabindex: 0,
+        'data-tip': `${sgn(r.excess)} golpes frente a tu hándicap\nHoyo ${r.n} · par ${r.par} · hándicap ${r.si}\nMedia ${sgn(r.toPar)} al par · ${r.count} veces · par o mejor ${pct(r.t.under + r.t.par, r.count)} %`,
+      }, svg);
+      svgEl('rect', { x: pad.l, y, width: W - pad.l - pad.r, height: rowH, class: 'hit' }, g);
+      const bh = Math.min(16, rowH - 6);
+      if (w > 0.5) {
+        const rad = Math.min(4, w / 2);
+        const yy = y + (rowH - bh) / 2;
+        // extremo redondeado solo en la punta, recto en la línea de cero
+        const d = r.excess < 0
+          ? `M${mid},${yy} H${x + rad} Q${x},${yy} ${x},${yy + rad} V${yy + bh - rad} Q${x},${yy + bh} ${x + rad},${yy + bh} H${mid} Z`
+          : `M${mid},${yy} H${mid + w - rad} Q${mid + w},${yy} ${mid + w},${yy + rad} V${yy + bh - rad} Q${mid + w},${yy + bh} ${mid + w - rad},${yy + bh} H${mid} Z`;
+        svgEl('path', { d, class: r.excess < 0 ? 'bar under' : 'bar over' }, g);
+      }
+      const lx = r.excess < 0 ? mid - w - 6 : mid + w + 6;
+      svgEl('text', { x: lx, y: y + rowH / 2 + 4, class: 'lab', 'text-anchor': r.excess < 0 ? 'end' : 'start' }, g).textContent = sgn(r.excess);
+    });
+    const tbl = document.createElement('details');
+    tbl.innerHTML = `<summary>Ver como tabla</summary><div class="table-scroll"><table class="score"><thead><tr><th>Hoyo</th><th>Par</th><th>Hcp</th><th>Veces</th><th>Al par</th><th>Vs. hándicap</th><th>Par o mejor</th></tr></thead><tbody>${
+      rows.map((r) => `<tr><td>${r.n}</td><td>${r.par}</td><td>${r.si}</td><td>${r.count}</td><td>${r.count ? sgn(r.toPar) : '–'}</td><td>${r.count ? sgn(r.excess) : '–'}</td><td>${r.count ? pct(r.t.under + r.t.par, r.count) + ' %' : '–'}</td></tr>`).join('')}</tbody></table></div>`;
+    box.append(tbl);
+  }
+
+  // Dispersión de un palo: desvío lateral (x) y distancia (y) de cada golpe, con la caja central (cuartiles).
+  function drawDispersion(box, shots, club) {
+    const W = Math.max(300, Math.min(560, box.clientWidth - 32));
+    const H = 280;
+    const pad = { l: 40, r: 14, t: 14, b: 30 };
+    const ds = shots.map((s) => s.d);
+    const lats = shots.map((s) => s.lat);
+    const latMax = Math.max(15, ...lats.map(Math.abs)) * 1.1;
+    const dLo = Math.max(0, Math.floor((Math.min(...ds) - 10) / 10) * 10);
+    const dHi = Math.ceil((Math.max(...ds) + 10) / 10) * 10;
+    const X = (v) => pad.l + ((v + latMax) / (2 * latMax)) * (W - pad.l - pad.r);
+    const Y = (v) => pad.t + ((dHi - v) / (dHi - dLo)) * (H - pad.t - pad.b);
+    const med = quant(ds, 0.5);
+    const latMed = quant(lats, 0.5);
+    const side = Math.abs(latMed) < 3 ? 'recto' : latMed > 0 ? `a la derecha (${Math.round(latMed)} m)` : `a la izquierda (${Math.round(-latMed)} m)`;
+    const cfg = bagClub(club);
+    box.innerHTML = `<p class="viz-note">${shots.length} golpe${shots.length === 1 ? '' : 's'} · distancia mediana <b>${Math.round(med)} m</b>${shots.length >= 4 ? ` (la mitad entre ${Math.round(quant(ds, 0.25))} y ${Math.round(quant(ds, 0.75))} m)` : ''} · tendencia <b>${side}</b>. En tu bolsa: ${cfg.dist} m.
+      ${shots.length >= 3 && Math.abs(med - cfg.dist) >= 8 ? `<button class="btn small" id="use-med">Usar ${Math.round(med)} m en la bolsa</button>` : ''}</p>`;
+    const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': `Dispersión de ${clubName(club)}` }, box);
+    for (let v = dLo; v <= dHi; v += dHi - dLo > 80 ? 20 : 10) {
+      svgEl('line', { x1: pad.l, x2: W - pad.r, y1: Y(v), y2: Y(v), class: 'grid' }, svg);
+      svgEl('text', { x: pad.l - 6, y: Y(v) + 4, class: 'tick', 'text-anchor': 'end' }, svg).textContent = `${v} m`;
+    }
+    svgEl('line', { x1: X(0), x2: X(0), y1: pad.t, y2: H - pad.b, class: 'axis0' }, svg);
+    svgEl('text', { x: X(0), y: H - 8, class: 'tick', 'text-anchor': 'middle' }, svg).textContent = 'línea a bandera';
+    svgEl('text', { x: pad.l + 2, y: H - 8, class: 'tick' }, svg).textContent = '← izquierda';
+    svgEl('text', { x: W - pad.r, y: H - 8, class: 'tick', 'text-anchor': 'end' }, svg).textContent = 'derecha →';
+    if (shots.length >= 4) {
+      const x0 = X(quant(lats, 0.25));
+      const x1 = X(quant(lats, 0.75));
+      const y0 = Y(quant(ds, 0.75));
+      const y1 = Y(quant(ds, 0.25));
+      svgEl('rect', { x: x0, y: y0, width: Math.max(2, x1 - x0), height: Math.max(2, y1 - y0), rx: 4, class: 'box' }, svg);
+    }
+    shots.forEach((s) => {
+      const g = svgEl('g', { tabindex: 0, 'data-tip': `${Math.round(s.d)} m · ${Math.abs(s.lat) < 1 ? 'recto' : `${Math.round(Math.abs(s.lat))} m a la ${s.lat > 0 ? 'derecha' : 'izquierda'}`}\nHoyo ${s.n} · ${fmtDate(s.date)}` }, svg);
+      svgEl('circle', { cx: X(s.lat), cy: Y(s.d), r: 12, class: 'hit' }, g);
+      svgEl('circle', { cx: X(s.lat), cy: Y(s.d), r: 4.5, class: 'pt' }, g);
+    });
+    const use = box.querySelector('#use-med');
+    if (use) use.onclick = () => {
+      bag.clubs[club] = { ...bagClub(club), dist: Math.round(med) };
+      Store.saveBag(bag);
+      toast(`${clubName(club)}: ${Math.round(med)} m en tu bolsa.`);
+      drawDispersion(box, shots, club);
+    };
+  }
+
+  // Mapa de un hoyo con todos los golpes apuntados en todas las vueltas.
+  const lieImgs = {};
+  function drawShotMap(P) {
+    const cv = app.querySelector('#shotmap');
+    const info = app.querySelector('#shotmap-info');
+    if (!cv) return;
+    const n = progressHole;
+    const raw = byNumber[n];
+    const h = GC.prepareHole(raw, 'amarillas');
+    const r = cv.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = Math.round(r.width * dpr);
+    cv.height = Math.round(r.height * dpr);
+    cv.setAttribute('aria-label', `Golpes apuntados en el hoyo ${n}`);
+    const c = cv.getContext('2d');
+    const rot = GC.holeRotation(h);
+    const cam = GC.fitCamera([h.tee, h.pin], rot, { w: r.width * 0.8, h: r.height * 0.86 }, 40, 0.1, 30);
+    const v = { cx: r.width / 2, cy: r.height / 2 };
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.save();
+    GC.applyCamera(c, cam, v);
+    GC.renderHole(c, h, 0, {});
+    c.restore();
+    const S = (p) => GC.worldToScreen(cam, v, p);
+    let shotsN = 0;
+    let roundsN = 0;
+    const ends = [];
+    for (const rd of rounds) {
+      const hs = rd.scores[n];
+      if (!hs || !hs.entries.length) continue;
+      roundsN++;
+      const pos = withRound(rd, () => positions(n));
+      hs.entries.forEach((e, i) => {
+        if (e.t !== 's') return;
+        shotsN++;
+        const pts = [pos[i]].concat(e.p || [], [pos[i + 1]]).map(S);
+        c.strokeStyle = e.l === 'water' || e.l === 'ob' ? 'rgba(255,110,90,0.85)' : 'rgba(255,248,210,0.8)';
+        c.lineWidth = 2;
+        c.lineCap = c.lineJoin = 'round';
+        c.beginPath();
+        pts.forEach((p, k) => (k ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y)));
+        c.stroke();
+        ends.push({ p: pts[pts.length - 1], l: e.l });
+      });
+    }
+    const pin = S(h.pin);
+    GC.drawFlag(c, pin.x, pin.y, 0.9, 0.4, 3);
+    // icono del lie donde quedó cada bola (encima de todas las líneas)
+    const pending = [];
+    for (const e of ends) {
+      const url = GC.Tour && GC.Tour.lieIconUrl ? GC.Tour.lieIconUrl(e.l) : null;
+      if (!url) continue;
+      let img = lieImgs[e.l];
+      if (!img) {
+        img = lieImgs[e.l] = new Image();
+        img.src = url;
+      }
+      if (img.complete) c.drawImage(img, e.p.x - 9, e.p.y - 9, 18, 18);
+      else pending.push(img);
+    }
+    if (pending.length) pending[0].onload = () => drawShotMap(P);
+    const row = P.holeRows.find((x) => x.n === n);
+    info.innerHTML = `<b>Hoyo ${n}</b> · par ${raw.par} · hándicap ${SI_OF(n)}<br>${row && row.count
+      ? `Jugado ${row.count} veces · media ${sgn(row.toPar)} al par · par o mejor ${pct(row.t.under + row.t.par, row.count)} % · dobles o peor ${pct(row.t.double, row.count)} %`
+      : 'Sin resultados todavía'}<br><span class="muted">${shotsN ? `${shotsN} golpes apuntados en ${roundsN} vuelta${roundsN === 1 ? '' : 's'}` : 'Ningún golpe apuntado en el mapa en este hoyo'}</span>`;
   }
 
   // ---------- resumen en 3D ----------

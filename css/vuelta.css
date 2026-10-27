@@ -532,3 +532,56 @@ table.score tr.t-over td { background: rgba(200, 50, 42, 0.06); }
 .tour-hint span { font: 800 22px/1 var(--font-display); color: var(--lime); }
 .tour-hint.out { opacity: 0; }
 @media (prefers-reduced-motion: reduce) { .tour.swipe-l .tour-cap, .tour.swipe-r .tour-cap { animation: none; } }
+
+/* ---------- mi progreso ---------- */
+:root { --viz-under: #2a78d6; --viz-over: #d4483b; --viz-dot: #9aa39d; --viz-grid: #e7e9e4; }
+:root[data-theme="dark"] { --viz-under: #3987e5; --viz-over: #e5604f; --viz-dot: #6b756f; --viz-grid: #26302b; }
+.section-title #progress { margin-left: auto; }
+.viz { padding: 14px 16px 10px; }
+.viz svg { display: block; overflow: visible; }
+.viz .grid { stroke: var(--viz-grid); stroke-width: 1; }
+.viz .axis0 { stroke: var(--stone); stroke-width: 1; }
+.viz .tick { font: 500 11.5px var(--font-body); fill: var(--slate); font-variant-numeric: tabular-nums; }
+.viz .lab { font: 700 12px var(--font-body); fill: var(--graphite); }
+.viz .line { fill: none; stroke: var(--viz-under); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.viz .dot { fill: var(--viz-dot); stroke: var(--white); stroke-width: 2; }
+.viz .end { fill: var(--viz-under); stroke: var(--white); stroke-width: 2; }
+.viz .pt { fill: var(--viz-under); stroke: var(--white); stroke-width: 2; }
+.viz .box { fill: var(--viz-under); opacity: 0.1; }
+.viz .hit { fill: transparent; }
+.viz g[tabindex] { outline: none; cursor: default; }
+.viz g[tabindex]:hover .dot, .viz g[tabindex]:focus .dot { fill: var(--graphite); }
+.viz g[tabindex]:hover .bar, .viz g[tabindex]:focus .bar { opacity: 0.8; }
+.viz g[tabindex]:hover .hit, .viz g[tabindex]:focus .hit { fill: var(--mist); }
+.viz .bar.under { fill: var(--viz-under); }
+.viz .bar.over { fill: var(--viz-over); }
+.viz .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 500 12.5px var(--font-body); color: var(--slate); margin-bottom: 8px; }
+.viz .legend span { display: inline-flex; align-items: center; gap: 6px; }
+.viz .k-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--viz-dot); }
+.viz .k-line { width: 16px; height: 2px; background: var(--viz-under); border-radius: 1px; }
+.viz .k-bar { width: 12px; height: 10px; border-radius: 2px; }
+.viz .k-bar.under { background: var(--viz-under); }
+.viz .k-bar.over { background: var(--viz-over); }
+.viz details { margin-top: 8px; font-size: 13px; }
+.viz summary { cursor: pointer; color: var(--emerald); font-weight: 600; }
+.viz-note { font-size: 14px; color: var(--slate); line-height: 1.45; margin: 0 0 10px; }
+.viz-note b { color: var(--graphite); }
+.viz-note .btn { margin-left: 6px; }
+.viz-tip {
+  position: fixed; z-index: 80; pointer-events: none; max-width: 260px; padding: 8px 10px; border-radius: 10px;
+  background: var(--graphite); color: var(--paper); font: 500 12.5px/1.35 var(--font-body); box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.viz-tip b { font: 700 14px/1.2 var(--font-body); }
+.viz-tip[hidden] { display: none; }
+.hole-pick { margin-bottom: 10px; }
+.hole-pick button { min-width: 38px; justify-content: center; }
+#club-pick { margin-bottom: 10px; }
+#club-pick small { opacity: 0.7; margin-left: 2px; }
+.shotmap-wrap { position: relative; border-radius: var(--r); overflow: hidden; box-shadow: var(--shadow); background: var(--pine); }
+#shotmap { display: block; width: 100%; height: 420px; }
+.shotmap-info {
+  position: absolute; left: 10px; right: 10px; bottom: 10px; padding: 10px 12px; border-radius: 12px;
+  background: var(--glass); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); font-size: 13px; line-height: 1.4;
+}
+@media (max-width: 600px) { #shotmap { height: 460px; } }

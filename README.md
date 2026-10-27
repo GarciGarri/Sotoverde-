@@ -63,6 +63,12 @@ que estabas viendo (el vídeo se pausa al escribir) y vuelve a salir en la ficha
 publicada, Claude responde como entrenador con los datos de la vuelta (golpes explicados, resultado, bolsa); usa la
 cuenta de Claude de quien lo ve y pide permiso la primera vez. Sin IA disponible, el comentario se guarda igual.
 
+**Mi progreso** (botón junto a «Tus vueltas»): resultado de cada vuelta de 18 hoyos y media de las 5 últimas; hoyo a
+hoyo, los golpes de más o de menos frente a los que da tu hándicap en ese hoyo (para ver dónde se escapan); un mapa
+de cada hoyo con todos los golpes apuntados y su lie; y la dispersión por palo (distancia y desvío respecto a la
+línea a bandera), con opción de llevar la distancia mediana a la bolsa. Las pruebas de pitch & putt y por equipos
+quedan fuera. Paleta azul/rojo validada para daltonismo; cada gráfico tiene su tabla.
+
 **Modo juego** (`jugar.html`): los mismos hoyos al estilo Golf Clash.
 
 Hoyos de golf reales en vista cenital, al estilo **Golf Clash**, hechos con HTML5 Canvas y JavaScript sin dependencias.
