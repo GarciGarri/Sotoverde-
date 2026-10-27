@@ -147,6 +147,24 @@
   const fmtDate = (iso) =>
     new Date(iso).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   const signed = (d) => (d === 0 ? 'E' : (d > 0 ? '+' : '') + d);
+  // Resultado respecto al par: categoría (para colores) y nombre.
+  const parKind = (d) => (d <= -2 ? 'eagle' : d === -1 ? 'birdie' : d === 0 ? 'par' : d === 1 ? 'bogey' : 'double');
+  const parName = (d) => (d <= -3 ? 'albatros' : d === -2 ? 'eagle' : d === -1 ? 'birdie' : d === 0 ? 'par'
+    : d === 1 ? 'bogey' : d === 2 ? 'doble bogey' : d === 3 ? 'triple bogey' : `+${d}`);
+
+  // Cartel grande sobre el mapa (resultado del hoyo o aviso al apuntar).
+  function scoreBanner(kind, title, sub, small) {
+    document.querySelectorAll('.score-banner').forEach((b) => b.remove());
+    const el = document.createElement('div');
+    el.className = `score-banner ${kind}${small ? ' small' : ''}`;
+    el.setAttribute('role', 'status');
+    el.innerHTML = `<b>${title}</b><span>${sub}</span>`;
+    document.body.appendChild(el);
+    setTimeout(() => el.classList.add('out'), small ? 1400 : 1900);
+    setTimeout(() => el.remove(), small ? 1800 : 2300);
+  }
+
+  const golpes = (k) => `${k} golpe${k === 1 ? '' : 's'}`;
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
   // ---------- almacenamiento ----------
@@ -1342,6 +1360,7 @@
   // Confirma la bola provisional: golpe nuevo, drop de una penalización o golpe movido.
   function commitGhost() {
     const n = currentN();
+    const before = holeStats(n).strokes;
     const hs = holeScore(n);
     const h = holeData(n);
     if (!ui.ghost) return;
@@ -1386,6 +1405,7 @@
     clearGhost();
     ui.selectedClub = suggestClub(n);
     afterChange();
+    notifyPar(n, before);
   }
 
   function detectLie(h, x, y) {
@@ -1397,6 +1417,21 @@
     Store.save(round);
     drawMap();
     renderHoleUi();
+  }
+
+  // Tras apuntar: «putt para…» al llegar al green y aviso al quedarse sin opción de par (o empeorar).
+  function notifyPar(n, before) {
+    const st = holeStats(n);
+    const hs = holeScore(n);
+    if (hs.done || st.strokes <= before) return;
+    const next = st.strokes + 1 - st.par;
+    const prev = before + 1 - st.par;
+    const last = hs.entries[hs.entries.length - 1];
+    if (last && last.t === 's' && last.l === 'green' && hs.putts === 0) {
+      scoreBanner(parKind(next), `Putt para ${parName(next)}`, `${Math.round(st.toPin)} m a bandera`, true);
+    } else if (next >= 1 && next > prev) {
+      scoreBanner(parKind(next), next === 1 ? 'Sin opción de par' : `Vas +${next - 1}`, `Emboca para ${parName(next)}`, true);
+    }
   }
 
   function renderHoleUi() {
@@ -1411,7 +1446,7 @@
     app.querySelector('#hole-id').innerHTML = `
       <div class="hv-num"><small>Hoyo</small>${n}</div>
       <div class="hv-meta">Par ${raw.par} · ${h.length} m<span>${teeOk ? (TEES.find((x) => x[0] === round.tees) || [0, ''])[1] : 'Amarillas'} · ${idx + 1} de ${round.holes.length}</span></div>`;
-    app.querySelector('#total').innerHTML = `<b class="${t.diff < 0 ? 'yes' : ''}">${t.played ? signed(t.diff) : 'E'}</b><span>${t.strokes} golpes</span>`;
+    app.querySelector('#total').innerHTML = `<b class="${t.diff < 0 ? 'k-birdie' : t.diff > 0 ? 'k-double' : ''}">${t.played ? signed(t.diff) : 'E'}</b><span>${golpes(t.strokes)}</span>`;
     app.querySelector('#prev').disabled = idx === 0;
 
     const putting = !hs.done && (ui.putting || st.lie === 'green' || hs.putts > 0);
@@ -1443,7 +1478,7 @@
     const pos = positions(n);
     if (hs.done) {
       action = `<div class="action"><button class="btn" id="reopen">Reabrir</button>
-        <button class="btn primary" id="next2"><span>${idx < round.holes.length - 1 ? 'Siguiente hoyo' : 'Ver tarjeta'}<small>${GC.scoreName(st.strokes, st.par)} · ${st.strokes} golpes</small></span></button></div>`;
+        <button class="btn primary" id="next2"><span>${idx < round.holes.length - 1 ? 'Siguiente hoyo' : 'Ver tarjeta'}<small>${GC.scoreName(st.strokes, st.par)} · ${golpes(st.strokes)}</small></span></button></div>`;
     } else if (ui.ghost) {
       const from = ui.moveIndex != null ? pos[ui.moveIndex] : pos[pos.length - 1];
       const d = Math.round(GC.dist(from, ui.ghost));
@@ -1456,7 +1491,7 @@
       action = `<div class="putt-row"><span class="lbl">Putts</span>
         <span class="stepper"><button id="p-minus" aria-label="Quitar putt">−</button><span class="val">${hs.putts}</span><button id="p-plus" aria-label="Añadir putt">+</button></span>
         <span class="grow"></span></div>
-        <div class="action"><button class="btn primary" id="finish" ${st.strokes ? '' : 'disabled'}><span>Embocada · terminar<small>${st.strokes} golpes en el hoyo</small></span></button></div>`;
+        <div class="action"><button class="btn primary" id="finish" ${st.strokes ? '' : 'disabled'}><span>Embocada · terminar<small>${golpes(st.strokes)} en el hoyo</small></span></button></div>`;
     } else {
       const trace = ui.inputMode === 'trazo' && !ui.pickTarget && !ui.pendingDrop && ui.moveIndex == null;
       const msg = ui.pickTarget ? 'Toca el punto al que quieres jugar'
@@ -1512,8 +1547,8 @@
         ${action}`;
     } else sheet.innerHTML = `<button class="grab" id="grab" aria-label="${ui.more ? 'Plegar' : 'Desplegar'} el panel"></button>
       <div class="sh-head">
-        <div><span class="eyebrow">${hs.done ? 'Hoyo terminado' : putting ? 'En el green' : 'Golpe'}</span>
-          <div class="big num">${hs.done ? st.strokes : st.strokes + 1}</div>
+        <div><span class="eyebrow">${hs.done ? `Hoyo terminado · ${parName(st.strokes - st.par)}` : `${putting ? 'Putt' : 'Golpe'} para ${st.strokes === 0 ? 'hoyo en uno' : parName(st.strokes + 1 - st.par)}`}</span>
+          <div class="big num k-${parKind(hs.done ? st.strokes - st.par : st.strokes + 1 - st.par)}">${hs.done ? st.strokes : st.strokes + 1}</div>
           <span class="from">${hs.done ? `${st.putts} putts` : `desde <b>${lieName(st.lie)}</b>`}</span></div>
         <div class="right"><span class="eyebrow">A bandera</span><div class="big num">${Math.round(st.toPin)}<small>m</small></div>
           <span class="from">${rec || hs.done || !h.elev ? '' : `juega ${Math.round(GC.playsLike(h, pos[pos.length - 1], h.pin))} m por desnivel`}</span></div>
@@ -1545,15 +1580,22 @@
     if ($s('#cancel')) $s('#cancel').onclick = () => { clearGhost(); afterChange(); };
     if ($s('#commit')) $s('#commit').onclick = commitGhost;
     if ($s('#p-minus')) $s('#p-minus').onclick = () => { hs.putts = Math.max(0, hs.putts - 1); afterChange(); };
-    if ($s('#p-plus')) $s('#p-plus').onclick = () => { hs.putts += 1; afterChange(); };
+    if ($s('#p-plus')) $s('#p-plus').onclick = () => {
+      const before = st.strokes;
+      hs.putts += 1;
+      afterChange();
+      notifyPar(n, before);
+    };
     if ($s('#to-putts')) $s('#to-putts').onclick = () => { ui.putting = true; ui.ghost = null; afterChange(); };
     if ($s('#back-shots')) $s('#back-shots').onclick = () => { ui.putting = false; hs.putts = 0; afterChange(); };
     if ($s('#pen')) $s('#pen').onclick = () => {
+      const before = st.strokes;
       hs.entries.push({ t: 'p' });
       ui.pendingDrop = true;
       ui.putting = false;
       ui.ghost = null;
       afterChange();
+      notifyPar(n, before);
     };
     if ($s('#undo')) $s('#undo').onclick = () => {
       if (hs.putts > 0 && putting) hs.putts -= 1;
@@ -1570,10 +1612,15 @@
         round.finished = true;
         Store.save(round);
         renderCard();
+        const t = totals();
+        scoreBanner(t.diff < 0 ? 'birdie' : t.diff === 0 ? 'par' : t.diff <= 3 ? 'bogey' : 'double', 'Vuelta terminada', `${golpes(t.strokes)} · ${signed(t.diff)} al par`);
         return;
       }
       Store.save(round);
-      toast(`${GC.scoreName(st.strokes, st.par)} en el ${n}`);
+      const d = st.strokes - st.par;
+      scoreBanner(st.strokes === 1 ? 'eagle' : parKind(d),
+        st.strokes === 1 ? '¡Hoyo en uno!' : d < 0 ? `¡${parName(d)}!` : parName(d),
+        `Hoyo ${n} · ${golpes(st.strokes)} · ${signed(d)}`);
       const nextIdx = round.holes.findIndex((m, i) => i > round.cur && !(round.scores[m] && round.scores[m].done));
       openHole(nextIdx >= 0 ? nextIdx : Math.min(round.cur + 1, round.holes.length - 1));
     };
@@ -1816,7 +1863,8 @@
       } else {
         section.par += st.par;
       }
-      rows.push(`<tr class="link" data-i="${i}"><td>${n}</td><td>${st.par}</td>
+      const tint = st.done ? (st.strokes < st.par ? ' t-under' : st.strokes > st.par ? ' t-over' : '') : '';
+      rows.push(`<tr class="link${tint}" data-i="${i}"><td>${n}</td><td>${st.par}</td>
         <td>${played ? mark(st.strokes, st.par) + (st.done ? '' : '<span class="muted">…</span>') : '–'}</td>
         <td>${played ? st.putts : '–'}</td>
         <td>${st.fairway == null ? '<span class="muted">·</span>' : st.fairway ? '<span class="yes">✓</span>' : '<span class="no">✗</span>'}</td>
@@ -1917,5 +1965,6 @@
   window.__vuelta = {
     get round() { return round; }, get store() { return Store; }, toUtm30, tapMap: (p) => tapMap(p),
     teeScreen: () => { const pos = positions(currentN()); return GC.worldToScreen(cam, mapView, pos[pos.length - 1]); },
+    pinScreen: () => GC.worldToScreen(cam, mapView, holeData(currentN()).pin),
   };
 })();

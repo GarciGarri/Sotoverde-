@@ -306,3 +306,33 @@ table.score tr.link { cursor: pointer; }
 .shot-chip .shape { font: 800 13px var(--font-display); text-transform: uppercase; color: #d9541c; letter-spacing: 0.04em; }
 .action .mode { align-self: center; }
 .action .mode button { padding: 12px 12px; }
+
+/* ---------- resultado respecto al par ---------- */
+:root { --k-eagle: #0b5e33; --k-birdie: #1f7a45; --k-par: #18211c; --k-bogey: #c2711a; --k-double: #c8322a; }
+:root[data-theme="dark"] { --k-eagle: #7fe0a3; --k-birdie: #5fcb87; --k-par: #eef2ee; --k-bogey: #f0a54a; --k-double: #ff7a6b; }
+.k-eagle { color: var(--k-eagle); }
+.k-birdie { color: var(--k-birdie); }
+.k-par { color: var(--k-par); }
+.k-bogey { color: var(--k-bogey); }
+.k-double { color: var(--k-double); }
+.score-banner {
+  position: fixed; left: 50%; top: 38%; z-index: 30; pointer-events: none; text-align: center;
+  min-width: min(300px, calc(100% - 40px)); max-width: calc(100% - 32px); padding: 18px 26px 16px; border-radius: 20px; color: #fff;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35); transform: translate(-50%, -50%); transition: opacity 0.35s, transform 0.35s;
+}
+.score-banner b { display: block; font: 800 50px/0.9 var(--font-display); text-transform: uppercase; letter-spacing: 0.01em; }
+.score-banner span { display: block; margin-top: 8px; font: 600 15px var(--font-body); opacity: 0.92; }
+.score-banner.small { top: 30%; padding: 12px 20px; }
+.score-banner.small b { font-size: 30px; }
+.score-banner.eagle { background: linear-gradient(135deg, #073d21, #1f7a45); box-shadow: 0 0 0 3px #a8d672, 0 20px 50px rgba(0, 0, 0, 0.35); }
+.score-banner.birdie { background: linear-gradient(135deg, #17532f, #2f9a58); }
+.score-banner.par { background: linear-gradient(135deg, #18211c, #3a463f); }
+.score-banner.bogey { background: linear-gradient(135deg, #a85a12, #d98a1c); }
+.score-banner.double { background: linear-gradient(135deg, #8f241d, #c8322a); }
+.score-banner.out { opacity: 0; transform: translate(-50%, -60%); }
+@media (prefers-reduced-motion: no-preference) {
+  .score-banner { animation: pop 0.38s cubic-bezier(0.2, 1.4, 0.4, 1); }
+  @keyframes pop { from { opacity: 0; transform: translate(-50%, -50%) scale(0.7); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+}
+table.score tr.t-under td { background: rgba(31, 122, 69, 0.08); }
+table.score tr.t-over td { background: rgba(200, 50, 42, 0.06); }

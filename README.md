@@ -15,6 +15,11 @@ animado, se guarda simplificado y se clasifica la curva (recto, draw, fade, ganc
 invierte desde Mi bolsa). La tarjeta muestra el vuelo trazado más repetido por palo y Mi bolsa propone usarlo
 como vuelo habitual.
 
+Resultado respecto al par: el número de golpe lleva el color de lo que harías si embocas con él
+(«golpe para birdie», «para par», «para bogey»…: verde, gris, ámbar, rojo). Al llegar al green sale
+«Putt para…», al quedarte sin opción de par un aviso ámbar o rojo, y al terminar el hoyo un cartel con el
+resultado. En la tarjeta las filas bajo par van en verde y las de sobre par en rojo.
+
 La app se abre siempre en modo claro; el oscuro solo si se elige expresamente en el visor.
 
 **Mi bolsa**: cada palo con su distancia habitual, vuelo (recto, draw, fade, gancho, slice), altura de bola y
