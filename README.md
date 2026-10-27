@@ -175,6 +175,10 @@ Metros, origen arriba a la izquierda, `y` hacia abajo. Ángulos de brújula: 0 =
 }
 ```
 
+Calles de los pares 4 y 5 de la vuelta (6, 9, 14, 16): trazadas sobre la ortofoto con `tools/calles_desde_orto.py`
+(hierba segada por color y textura alrededor de la línea de juego; control en `datos/sotoverde/calles/`). En los pares 3
+de la vuelta la «calle» sigue siendo el antegreen aproximado, que no cuenta para calles cogidas.
+
 ## Estructura
 
 ```
