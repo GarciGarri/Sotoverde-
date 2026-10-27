@@ -16,7 +16,7 @@
 
   const params = new URLSearchParams(location.search);
   const holes = GC.resolveHoleList(params.get('hoyos'));
-  const exitUrl = params.get('volver') || 'index.html';
+  const exitUrl = params.get('volver') || 'jugar.html';
   const teeKey = params.get('salida'); // barras: amarillas, rojas…
 
   const round = { index: 0, cards: [] };
@@ -1102,7 +1102,7 @@
   resize();
   buildClubBar();
   if (!holes.length) {
-    openModal('<h2>No hay hoyos</h2><p>No se encontró ningún hoyo para jugar.</p><div class="actions"><button onclick="location.href=\'index.html\'" class="primary">Menú</button></div>');
+    openModal('<h2>No hay hoyos</h2><p>No se encontró ningún hoyo para jugar.</p><div class="actions"><button onclick="location.href=\'jugar.html\'" class="primary">Menú</button></div>');
   } else {
     startHole(0);
   }

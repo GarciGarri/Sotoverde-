@@ -1,5 +1,13 @@
 # Sotoverde Clash
 
+**Mis vueltas** (`index.html`): apunta los golpes de una vuelta real en Golf Sotoverde tocando en el mapa de
+cada hoyo dónde quedó la bola (palo, distancia y lie automáticos), con penalizaciones, putts, tarjeta y
+estadísticas (calles, greens en regulación, distancia media por palo). En la página publicada las vueltas se
+guardan en la cuenta de cada persona; abierto en local, en el navegador. El botón GPS funciona donde el
+navegador da la ubicación (no dentro de claude.ai).
+
+**Modo juego** (`jugar.html`): los mismos hoyos al estilo Golf Clash.
+
 Hoyos de golf reales en vista cenital, al estilo **Golf Clash**, hechos con HTML5 Canvas y JavaScript sin dependencias.
 Los **18 hoyos** del campo de **Golf Sotoverde** (Arroyo de la Encomienda, Valladolid), par 60, 3.185 m desde amarillas.
 
