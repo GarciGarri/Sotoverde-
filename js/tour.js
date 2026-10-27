@@ -783,7 +783,8 @@
 
   function caption(player, d) {
     const el = player.container.querySelector('.tour-cap');
-    el.innerHTML = `<span class="eyebrow">${d.eyebrow}</span><b class="t-title">${d.title}</b>
+    const lie = d.lie ? `<span class="t-lie lie-${d.lie.k}"><img alt="" src="${lieIconUrl(d.lie.k)}">${d.lie.name}</span>` : '';
+    el.innerHTML = `<span class="eyebrow">${d.eyebrow}</span><div class="t-head"><b class="t-title">${d.title}</b>${lie}</div>
       <div class="t-line">${d.line}</div>
       ${d.chips.length ? `<div class="t-chips">${d.chips.map((c) => `<span>${c}</span>`).join('')}</div>` : ''}
       ${d.tip ? `<p class="t-tip">${d.tip}</p>` : ''}`;
@@ -819,6 +820,186 @@
       } else start(player);
     } else if (a === 'next') seekSeg(player, seg + 1);
     else if (a === 'prev') seekSeg(player, seg - 1);
+  }
+
+  // ---------- iconos del lie (calle, rough, búnker, green, agua, fuera, tee) ----------
+
+  // Dibuja el icono en un círculo de diámetro s con esquina superior izquierda en (x, y).
+  function drawLieIcon(g, lie, x, y, s) {
+    const k = s / 128;
+    g.save();
+    g.translate(x, y);
+    g.scale(k, k);
+    g.beginPath();
+    g.arc(64, 64, 60, 0, Math.PI * 2);
+    g.save();
+    g.clip();
+    const ball = (bx, by, r = 13) => {
+      g.fillStyle = 'rgba(0,0,0,0.25)';
+      g.beginPath();
+      g.ellipse(bx + 3, by + r * 0.8, r, r * 0.45, 0, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = '#ffffff';
+      g.beginPath();
+      g.arc(bx, by, r, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = 'rgba(0,0,0,0.12)';
+      for (const [dx, dy] of [[-4, -3], [3, -5], [5, 2], [-2, 4], [-6, 3]]) {
+        g.beginPath();
+        g.arc(bx + dx, by + dy, 1.6, 0, Math.PI * 2);
+        g.fill();
+      }
+    };
+    if (lie === 'fairway' || lie === 'tee') {
+      // césped segado a franjas
+      for (let i = -4; i < 8; i++) {
+        g.fillStyle = i % 2 ? '#6fbf4a' : '#86d35d';
+        g.beginPath();
+        g.moveTo(i * 24, 0);
+        g.lineTo(i * 24 + 24, 0);
+        g.lineTo(i * 24 + 24 + 60, 128);
+        g.lineTo(i * 24 + 60, 128);
+        g.fill();
+      }
+      if (lie === 'tee') {
+        g.fillStyle = '#d9a35b';
+        g.beginPath();
+        g.moveTo(52, 70);
+        g.lineTo(76, 70);
+        g.lineTo(68, 78);
+        g.lineTo(66, 108);
+        g.lineTo(62, 108);
+        g.lineTo(60, 78);
+        g.fill();
+        ball(64, 56, 15);
+      } else ball(64, 66, 15);
+    } else if (lie === 'rough') {
+      g.fillStyle = '#3f7f2f';
+      g.fillRect(0, 0, 128, 128);
+      ball(64, 72, 15);
+      // hierba alta por delante de la bola
+      const rand = GC.rng(5);
+      for (let i = 0; i < 42; i++) {
+        const bx = rand() * 128;
+        const by = 40 + rand() * 95;
+        g.strokeStyle = rand() < 0.5 ? '#2c6322' : '#5aa040';
+        g.lineWidth = 3;
+        g.beginPath();
+        g.moveTo(bx, by);
+        g.quadraticCurveTo(bx + 4, by - 16, bx + (rand() - 0.5) * 14, by - 26 - rand() * 14);
+        g.stroke();
+      }
+    } else if (lie === 'sand') {
+      g.fillStyle = '#ecd59a';
+      g.fillRect(0, 0, 128, 128);
+      g.strokeStyle = 'rgba(160,120,60,0.45)';
+      g.lineWidth = 3;
+      for (let i = 0; i < 9; i++) {
+        g.beginPath();
+        g.moveTo(-10, 14 + i * 14);
+        g.bezierCurveTo(40, 4 + i * 14, 80, 26 + i * 14, 140, 12 + i * 14);
+        g.stroke();
+      }
+      ball(64, 70, 15);
+    } else if (lie === 'green') {
+      g.fillStyle = '#9ee07a';
+      g.fillRect(0, 0, 128, 128);
+      g.fillStyle = '#7cc95c';
+      g.beginPath();
+      g.arc(64, 64, 40, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = '#1d2b20';
+      g.beginPath();
+      g.ellipse(58, 90, 13, 6, 0, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = '#f4f4f4';
+      g.fillRect(56, 28, 4, 62);
+      g.fillStyle = '#d8322a';
+      g.beginPath();
+      g.moveTo(60, 28);
+      g.lineTo(90, 38);
+      g.lineTo(60, 48);
+      g.fill();
+      ball(86, 92, 10);
+    } else if (lie === 'water') {
+      g.fillStyle = '#2f86c9';
+      g.fillRect(0, 0, 128, 128);
+      g.strokeStyle = 'rgba(255,255,255,0.85)';
+      g.lineWidth = 6;
+      g.lineCap = 'round';
+      for (const yy of [44, 68, 92]) {
+        g.beginPath();
+        for (let xx = 10; xx <= 118; xx += 4) {
+          const yv = yy + Math.sin(xx / 9) * 5;
+          if (xx === 10) g.moveTo(xx, yv);
+          else g.lineTo(xx, yv);
+        }
+        g.stroke();
+      }
+    } else if (lie === 'ob') {
+      g.fillStyle = '#56704a';
+      g.fillRect(0, 0, 128, 128);
+      g.fillStyle = '#ffffff';
+      g.fillRect(56, 22, 16, 92);
+      g.fillStyle = '#1f2a22';
+      g.fillRect(56, 22, 16, 10);
+      g.strokeStyle = '#d8322a';
+      g.lineWidth = 6;
+      g.beginPath();
+      g.moveTo(24, 24);
+      g.lineTo(104, 104);
+      g.moveTo(104, 24);
+      g.lineTo(24, 104);
+      g.stroke();
+    } else {
+      g.fillStyle = '#6fbf4a';
+      g.fillRect(0, 0, 128, 128);
+      ball(64, 64, 15);
+    }
+    g.restore();
+    g.lineWidth = 6;
+    g.strokeStyle = '#ffffff';
+    g.beginPath();
+    g.arc(64, 64, 60, 0, Math.PI * 2);
+    g.stroke();
+    g.restore();
+  }
+
+  const iconCache = {};
+  function lieIconUrl(lie) {
+    if (!iconCache[lie]) {
+      const c = document.createElement('canvas');
+      c.width = c.height = 96;
+      drawLieIcon(c.getContext('2d'), lie, 0, 0, 96);
+      iconCache[lie] = c.toDataURL('image/png');
+    }
+    return iconCache[lie];
+  }
+
+  // Marca en 3D donde quedó la bola: el icono del lie con el número del golpe.
+  function lieSprite(THREE, lie, n) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 160;
+    const g = c.getContext('2d');
+    drawLieIcon(g, lie, 8, 24, 128);
+    g.fillStyle = '#0f3a24';
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 6;
+    g.beginPath();
+    g.arc(124, 36, 30, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+    g.fillStyle = '#ffffff';
+    g.font = "800 40px 'Barlow Condensed', 'Arial Narrow', sans-serif";
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(String(n), 124, 39);
+    const tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+    sp.scale.set(5.2, 5.2, 1);
+    sp.renderOrder = 11;
+    return sp;
   }
 
   // ---------- repetición de una vuelta o de un hoyo, con los golpes dibujados ----------
@@ -930,8 +1111,8 @@
           color: LIE_COLOR[st.lie] || 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthWrite: false }));
         ring.rotation.x = -Math.PI / 2;
         ring.position.copy(end);
-        const num = textSprite(THREE, String(k), { round: true, size: 3.6 });
-        num.position.copy(end).add(new THREE.Vector3(0, 4.2, 0));
+        const num = lieSprite(THREE, st.lie, k);
+        num.position.copy(end).add(new THREE.Vector3(0, 4.6, 0));
         it.marker = new THREE.Group();
         it.marker.add(ring, num);
         group.add(it.marker);
@@ -1032,5 +1213,5 @@
     return { pos, look: player.W(c.x, c.y, 0), seg, sub: 0 };
   }
 
-  GC.Tour = { mount, replay, dispose, holeInfo, courseModel };
+  GC.Tour = { mount, replay, dispose, holeInfo, courseModel, lieIconUrl };
 })(typeof window !== 'undefined' ? window : globalThis);

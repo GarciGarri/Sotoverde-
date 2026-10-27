@@ -2060,7 +2060,7 @@
         const d = GC.dist(A, B);
         const left = GC.dist(B, h.pin);
         const dz = h.heightAt(B.x, B.y) - h.heightAt(A.x, A.y);
-        const chips = [lieName(e.l)];
+        const chips = [];
         if (e.f) chips.push(`Vuelo ${shapeName(e.f).toLowerCase()}`);
         if (Math.abs(dz) >= 2) chips.push(`${dz > 0 ? 'Sube' : 'Baja'} ${Math.abs(dz).toFixed(0)} m`);
         const holed = hs.done && i === hs.entries.length - 1 && !hs.putts && left < 3;
@@ -2074,7 +2074,7 @@
             eyebrow: `Hoyo ${n} · golpe ${k}`,
             title: `${clubName(e.c)} · ${Math.round(d)} m`,
             line: `${LIE_FROM[lie] || 'Desde ' + lieName(lie).toLowerCase()} ${LIE_TO[e.l] || lieName(e.l).toLowerCase()}${holed ? ' · dentro' : ` · quedan ${Math.round(left)} m`}`,
-            chips, tip,
+            chips, tip, lie: { k: e.l, name: holed ? 'Dentro' : lieName(e.l) },
           },
         });
         lie = e.l;
@@ -2084,7 +2084,7 @@
         steps.push({
           kind: 'drop', from: A, to: B, lie,
           cap: {
-            eyebrow: `Hoyo ${n} · golpe ${k}`, title: 'Penalización',
+            eyebrow: `Hoyo ${n} · golpe ${k}`, title: 'Penalización', lie: dropped ? { k: lie, name: `Drop en ${lieName(lie).toLowerCase()}` } : null,
             line: `+1 golpe${dropped ? ` · drop en ${lieName(lie).toLowerCase()} a ${Math.round(GC.dist(B, h.pin))} m de la bandera` : ''}`,
             chips: [], tip: '',
           },
@@ -2097,7 +2097,7 @@
         kind: 'putts', from: L, to: h.pin, lie: 'green',
         cap: {
           eyebrow: `Hoyo ${n} · en el green`,
-          title: `${hs.putts} putt${hs.putts === 1 ? '' : 's'}`,
+          title: `${hs.putts} putt${hs.putts === 1 ? '' : 's'}`, lie: { k: 'green', name: 'Green' },
           line: `Desde ${Math.round(GC.dist(L, h.pin))} m${hs.done ? ' · embocada' : ''}`,
           chips: [], tip: hs.putts >= 3 ? 'Tres putts o más: el green se complicó.' : hs.putts === 1 ? 'Un solo putt.' : '',
         },

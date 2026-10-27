@@ -47,7 +47,8 @@ agua, búnkeres y un consejo. Se puede pausar y saltar de tramo.
 de cada fila (o «Ver en 3D» al terminar un hoyo) repasa un solo hoyo. La cámara se pone detrás de la bola en
 cada golpe, la bola vuela con su estela (siguiendo la línea trazada si el golpe se dibujó; en rojo si acabó en
 agua o fuera), queda una marca numerada donde paró y una ficha explica el golpe: palo, metros, de dónde a dónde,
-lo que quedaba a bandera, desnivel y vuelo. Luego las penalizaciones con su drop, los putts y el resultado del
+lo que quedaba a bandera, desnivel y vuelo, con un icono del lie (calle, rough, búnker, green, agua, fuera) en la
+ficha y en la marca 3D donde quedó la bola. Luego las penalizaciones con su drop, los putts y el resultado del
 hoyo; la vuelta empieza y acaba con el resumen (golpes, resultado al par, pares, bogeys, putts, mejor hoyo).
 Los hoyos de tarjetas importadas sin golpes en el mapa se enseñan con su resultado.
 
