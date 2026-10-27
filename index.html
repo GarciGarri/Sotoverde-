@@ -45,15 +45,20 @@
         const c = document.createElement('canvas');
         el.appendChild(c);
         const h = GC.prepareHole(raw);
+        const tees = raw.tees ? Object.entries(raw.tees) : [];
+        const teeLinks = tees.map(([k, t]) => {
+          const d = Math.round(Math.hypot(t.x - raw.pin.x, t.y - raw.pin.y));
+          return `<a class="btn${k === tees[0][0] ? ' primary' : ''}" href="juego.html?hoyos=${encodeURIComponent(raw.id)}&salida=${k}">${t.label || k} · ${d} m</a>`;
+        }).join('');
         el.insertAdjacentHTML('beforeend', `
           <div class="info">
             <b>Hoyo ${raw.number} · ${raw.name}</b>
-            <small>Par ${h.par} · ${h.length} m${raw.card ? ' · ' + raw.card : ''}</small>
+            <small>Par ${h.par}${tees.length ? '' : ' · ' + h.length + ' m'}${raw.card ? ' · ' + raw.card : ''}</small>
             ${raw.elevation ? '<span><span class="tag">Relieve real</span></span>' : ''}
             <label><input type="checkbox"> Incluir en la ronda</label>
           </div>
           <div class="row">
-            <a class="btn primary" href="juego.html?hoyos=${encodeURIComponent(raw.id)}">Jugar</a>
+            ${teeLinks || `<a class="btn primary" href="juego.html?hoyos=${encodeURIComponent(raw.id)}">Jugar</a>`}
             ${opts && opts.removable ? '<button class="btn" data-remove>Borrar</button>' : ''}
           </div>`);
         el.querySelector('input').addEventListener('change', (e) => {

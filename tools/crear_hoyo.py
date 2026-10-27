@@ -170,8 +170,12 @@ def control_image(crop, hole, path):
     for t in hole["trees"]:
         d.ellipse([(t["x"] - t["r"]) * PX, (t["y"] - t["r"]) * PX, (t["x"] + t["r"]) * PX, (t["y"] + t["r"]) * PX],
                   outline=(255, 60, 60, 255))
-    for k, col in (("tee", "white"), ("pin", "red")):
-        x, y = hole[k]["x"] * PX, hole[k]["y"] * PX
+    if hole.get("teeBox"):
+        d.polygon(P(hole["teeBox"]), outline=(255, 255, 255, 255))
+    marks = [(hole["pin"], "red")] + [(t, "yellow" if k == "amarillas" else "red" if k == "rojas" else "white")
+                                      for k, t in (hole.get("tees") or {"tee": hole["tee"]}).items()]
+    for p, col in marks:
+        x, y = p["x"] * PX, p["y"] * PX
         d.ellipse([x - 8, y - 8, x + 8, y + 8], outline=col, width=3)
     img.save(path, quality=88)
 
@@ -199,13 +203,17 @@ def main(cfg_path):
     ex = cfg.get("exclude_points", [])
     bunkers = [p for p in auto["bunkers"] if not excluded(p, ex)] + cfg.get("extra_bunkers", [])
     water = [p for p in auto["water"] if not excluded(p, ex)] + cfg.get("extra_water", [])
-    green, tee = cfg["green"], cfg["tee"]
-    trees = [t for t in auto["trees"]
-             if not point_in_poly(green, t["x"], t["y"])
-             and np.hypot(t["x"] - tee["x"], t["y"] - tee["y"]) > t["r"] + 4
-             and not any(point_in_poly(w, t["x"], t["y"]) for w in water)]
+    green = cfg["green"]
+    tees = [cfg["tee"]] + list(cfg.get("tees", {}).values())
+    box = cfg.get("teeBox")
     k = cfg.get("tree_scale", 1.0)  # la detección se queda corta con copas a contraluz
-    trees = [dict(t, r=round(t["r"] * k, 1)) for t in trees] + cfg.get("extra_trees", [])
+    trees = [dict(t, r=round(t["r"] * k, 1)) for t in auto["trees"]]
+    trees = [t for t in trees
+             if not point_in_poly(green, t["x"], t["y"])
+             and all(np.hypot(t["x"] - p["x"], t["y"] - p["y"]) > t["r"] + 4 for p in tees)
+             and not (box and point_in_poly(box, t["x"], t["y"]))
+             and not any(point_in_poly(w, t["x"], t["y"]) for w in water)]
+    trees += cfg.get("extra_trees", [])
 
     elev, z = elevation(cfg, cache_dir)
     hole = {
@@ -213,6 +221,8 @@ def main(cfg_path):
         "card": cfg.get("card", ""),
         "width": cfg["geo"]["width"], "height": cfg["geo"]["height"],
         "tee": cfg["tee"], "pin": cfg["pin"],
+        **({"tees": cfg["tees"]} if "tees" in cfg else {}),
+        **({"teeBox": cfg["teeBox"]} if "teeBox" in cfg else {}),
         "fairways": cfg["fairways"], "green": green,
         "bunkers": bunkers, "water": water, "trees": trees,
         "greenSlope": green_slope(cfg, z, water),

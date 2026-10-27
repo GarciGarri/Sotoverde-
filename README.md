@@ -32,6 +32,7 @@ Todo sale de datos abiertos del **Instituto Geográfico Nacional**:
 | Forma del hoyo y distancias | Ortofoto PNOA (WMS `pnoa-ma`) | 25 cm/px, georreferenciada |
 | Relieve | MDT05 (WCS `Elevacion25830_5`) | rejilla de 5 m |
 | Par y metros de tarjeta | Tarjeta del club | — |
+| Posición del tee | Marcador del jugador (Google Earth) y zona de salida marcada sobre la imagen de control | — |
 
 El proceso (`tools/crear_hoyo.py`):
 
@@ -66,7 +67,9 @@ Metros, origen arriba a la izquierda, `y` hacia abajo. Ángulos de brújula: 0 =
 {
   "id": "sotoverde-03", "name": "Sotoverde", "number": 3, "par": 4,
   "width": 340, "height": 150,
-  "tee": {"x": 290, "y": 62}, "pin": {"x": 55, "y": 91},
+  "tee": {"x": 314, "y": 58}, "pin": {"x": 55, "y": 91},
+  "tees": {"amarillas": {"x": 314, "y": 58, "label": "Amarillas"}, "rojas": {"x": 296, "y": 63, "label": "Rojas"}},
+  "teeBox": [[x, y], ...],                              // zona de salida (opcional)
   "fairways": [[[x, y], ...]], "green": [[x, y], ...],
   "bunkers": [[[x, y], ...]], "water": [[[x, y], ...]],
   "trees": [{"x": 0, "y": 0, "r": 4}],

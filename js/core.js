@@ -137,7 +137,9 @@
 
   // ---------- Preparación del hoyo ----------
 
-  GC.prepareHole = function (raw) {
+  // teeKey: barras de salida opcionales (raw.tees), p. ej. "amarillas" o "rojas".
+  GC.prepareHole = function (raw, teeKey) {
+    const teeRaw = (teeKey && raw.tees && raw.tees[teeKey]) || raw.tee;
     const h = {
       raw,
       id: raw.id,
@@ -146,7 +148,10 @@
       par: raw.par || 4,
       width: raw.width,
       height: raw.height,
-      tee: GC.toPoint(raw.tee),
+      tee: GC.toPoint(teeRaw),
+      teeKey: teeKey && raw.tees && raw.tees[teeKey] ? teeKey : null,
+      teeBox: raw.teeBox && raw.teeBox.length >= 3 ? GC.makePoly(raw.teeBox, 1) : null,
+      teeMarks: raw.tees ? Object.entries(raw.tees).map(([k, t]) => ({ key: k, x: t.x, y: t.y })) : [],
       pin: GC.toPoint(raw.pin),
       fairways: (raw.fairways || []).filter((p) => p.length >= 3).map((p) => GC.makePoly(p)),
       green: raw.green && raw.green.length >= 3 ? GC.makePoly(raw.green) : null,
@@ -170,6 +175,7 @@
       for (const p of h.bunkers) if (GC.polyContains(p, x, y)) return 'sand';
       if (h.green && GC.polyContains(h.green, x, y)) return 'green';
       for (const p of h.fairways) if (GC.polyContains(p, x, y)) return 'fairway';
+      if (h.teeBox && GC.polyContains(h.teeBox, x, y)) return 'tee';
       if (Math.hypot(x - h.tee.x, y - h.tee.y) < 6) return 'tee';
       return 'rough';
     };
@@ -293,6 +299,9 @@
   };
   GC.COLORS = COLORS;
 
+  const TEE_COLORS = { blancas: '#ffffff', amarillas: '#f6d84a', azules: '#3b7bea', rojas: '#e8312f' };
+  GC.TEE_COLORS = TEE_COLORS;
+
   let roughPattern = null;
   function getRoughPattern(ctx) {
     if (roughPattern || typeof document === 'undefined') return roughPattern;
@@ -355,21 +364,36 @@
       ctx.restore();
     }
 
-    // tee
-    ctx.save();
-    ctx.translate(h.tee.x, h.tee.y);
-    ctx.rotate(h.angle);
-    ctx.fillStyle = COLORS.firstCut;
-    ctx.fillRect(-7, -5, 14, 10);
-    ctx.fillStyle = COLORS.fairwayStripe;
-    ctx.fillRect(-6, -4, 12, 8);
-    ctx.fillStyle = '#f6d84a';
-    for (const y of [-3, 3]) {
-      ctx.beginPath();
-      ctx.arc(1.5, y, 0.5, 0, Math.PI * 2);
-      ctx.fill();
+    // tee: zona de salida real si existe; si no, un rectángulo orientado al hoyo
+    if (h.teeBox) {
+      ctx.strokeStyle = COLORS.firstCut;
+      ctx.lineWidth = 2;
+      ctx.stroke(h.teeBox.path);
+      ctx.fillStyle = COLORS.fairwayStripe;
+      ctx.fill(h.teeBox.path);
+    } else {
+      ctx.save();
+      ctx.translate(h.tee.x, h.tee.y);
+      ctx.rotate(h.angle);
+      ctx.fillStyle = COLORS.firstCut;
+      ctx.fillRect(-7, -5, 14, 10);
+      ctx.fillStyle = COLORS.fairwayStripe;
+      ctx.fillRect(-6, -4, 12, 8);
+      ctx.restore();
     }
-    ctx.restore();
+    const marks = h.teeMarks.length ? h.teeMarks : [{ key: 'amarillas', x: h.tee.x, y: h.tee.y }];
+    for (const m of marks) {
+      ctx.save();
+      ctx.translate(m.x, m.y);
+      ctx.rotate(h.angle);
+      ctx.fillStyle = TEE_COLORS[m.key] || '#ffffff';
+      for (const y of [-2.5, 2.5]) {
+        ctx.beginPath();
+        ctx.arc(0, y, 0.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
 
     // green
     if (h.green) {
@@ -559,8 +583,8 @@
   };
 
   // Miniatura del hoyo (menú).
-  GC.renderThumb = function (canvas, raw) {
-    const h = GC.prepareHole(raw);
+  GC.renderThumb = function (canvas, raw, teeKey) {
+    const h = GC.prepareHole(raw, teeKey);
     const ctx = canvas.getContext('2d');
     const rot = GC.holeRotation(h);
     const cam = GC.fitCamera(GC.holeCorners(h), rot, { w: canvas.width - 8, h: canvas.height - 8 }, 10, 0.01, 100);

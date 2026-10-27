@@ -17,6 +17,7 @@
   const params = new URLSearchParams(location.search);
   const holes = GC.resolveHoleList(params.get('hoyos'));
   const exitUrl = params.get('volver') || 'index.html';
+  const teeKey = params.get('salida'); // barras: amarillas, rojas…
 
   const round = { index: 0, cards: [] };
   let W = 0;
@@ -49,7 +50,7 @@
 
   function startHole(i) {
     round.index = i;
-    hole = GC.prepareHole(holes[i]);
+    hole = GC.prepareHole(holes[i], teeKey);
     const wind = holes[i].wind || GC.randomWind();
     g = {
       ball: { ...hole.tee },
@@ -76,7 +77,8 @@
     $('#hud-number').textContent = hole.number;
     $('#hud-name').textContent = hole.name;
     document.title = `Hoyo ${hole.number} · ${hole.name}`;
-    $('#hud-sub').textContent = `Par ${hole.par} · ${hole.length} m`;
+    const bars = hole.teeKey ? ` · ${holes[i].tees[hole.teeKey].label || hole.teeKey}` : '';
+    $('#hud-sub').textContent = `Par ${hole.par} · ${hole.length} m${bars}`;
     $('#hud-wind').textContent = `${wind.speed} km/h`;
     prepareShot();
     // empieza enseñando el hoyo entero y luego se acerca

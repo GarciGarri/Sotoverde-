@@ -3,17 +3,47 @@
  "name": "Sotoverde",
  "number": 3,
  "par": 4,
- "card": "Tarjeta: 261 m desde amarillas · dog-leg suave a la izquierda",
+ "card": "Tarjeta: 261 m desde amarillas, 243 m desde rojas · dog-leg suave a la izquierda",
  "width": 340,
  "height": 150,
  "tee": {
-  "x": 290,
-  "y": 62
+  "x": 314,
+  "y": 58
  },
  "pin": {
   "x": 55,
   "y": 91
  },
+ "tees": {
+  "amarillas": {
+   "x": 314,
+   "y": 58,
+   "label": "Amarillas"
+  },
+  "rojas": {
+   "x": 296,
+   "y": 63,
+   "label": "Rojas"
+  }
+ },
+ "teeBox": [
+  [
+   272.0,
+   73.4
+  ],
+  [
+   270.0,
+   65.6
+  ],
+  [
+   315.0,
+   53.6
+  ],
+  [
+   317.0,
+   61.4
+  ]
+ ],
  "fairways": [
   [
    [
@@ -1625,11 +1655,6 @@
    "x": 123.7,
    "y": 35.3,
    "r": 3.0
-  },
-  {
-   "x": 314.6,
-   "y": 50.7,
-   "r": 3.8
   },
   {
    "x": 293.2,

@@ -36,7 +36,7 @@ body.game { overflow: hidden; touch-action: none; user-select: none; -webkit-use
   background: var(--accent); color: #2a2200; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 .hud-name { font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hud-sub { font-size: 12px; color: var(--muted); }
+.hud-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
 .hud-stats { display: flex; gap: 14px; margin-left: auto; }
 .hud-stats div { display: flex; flex-direction: column; align-items: center; }
 .hud-stats .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
