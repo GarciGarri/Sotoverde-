@@ -517,7 +517,7 @@
     cam: null, // cámara manual (zoom/arrastre); null = encuadre automático bola-green
     loupe: null, // punto bajo el dedo mientras se mantiene pulsado
     target: null, pickTarget: false, ghost: null, more: false, putting: false,
-    ghostPath: null, drawPath: null, anim: null, camAuto: false,
+    ghostPath: null, drawPath: null, anim: null, camAuto: false, dictate: false,
     inputMode: (() => { try { return localStorage.getItem('sotoverde-modo') || 'toque'; } catch (e) { return 'toque'; } })(),
   };
 
@@ -1749,7 +1749,12 @@
       <button class="btn small" id="pen">+1 penalización</button>
       <button class="btn small" id="undo" ${hs.entries.length || hs.putts ? '' : 'disabled'}>Deshacer</button>
       ${putting ? '' : `<button class="btn small" id="finish2" ${st.strokes ? '' : 'disabled'}>Terminar hoyo</button>`}
-      <button class="btn small ghost" id="more" aria-expanded="${ui.more}">${ui.more ? 'Menos ▴' : 'Más ▾'}</button></div>`;
+      ${aiReady && !putting && !ui.pendingDrop && ui.moveIndex == null ? `<button class="btn small" id="dictate" aria-expanded="${ui.dictate}">Dictar golpe</button>` : ''}
+      <button class="btn small ghost" id="more" aria-expanded="${ui.more}">${ui.more ? 'Menos ▴' : 'Más ▾'}</button></div>
+      ${ui.dictate && !hs.done ? `<form class="dictate" id="dictate-form">
+        <input id="dictate-text" maxlength="200" autocomplete="off" placeholder="Ej.: hierro 7, rough a la derecha, quedan 40" aria-label="Describe el golpe">
+        <button class="btn small primary" type="submit">Colocar</button>
+        <span class="muted">Usa el micrófono del teclado. La IA coloca la bola y el palo; tú confirmas.</span></form>` : ''}`;
 
     // detalles: condiciones, objetivo y lista de golpes
     let details = '';
@@ -1816,6 +1821,15 @@
       renderHoleUi();
     }));
     if ($s('#more')) $s('#more').onclick = toggleMore;
+    if ($s('#dictate')) $s('#dictate').onclick = () => {
+      ui.dictate = !ui.dictate;
+      renderHoleUi();
+      if (ui.dictate) $s('#dictate-text') && app.querySelector('#dictate-text').focus();
+    };
+    if ($s('#dictate-form')) $s('#dictate-form').onsubmit = (e) => {
+      e.preventDefault();
+      dictateShot(app.querySelector('#dictate-text').value);
+    };
     if ($s('#use-rec')) $s('#use-rec').onclick = () => { ui.selectedClub = rec.club.id; ui.clubManual = false; renderHoleUi(); };
     if ($s('#cancel')) $s('#cancel').onclick = () => { clearGhost(); afterChange(); };
     if ($s('#commit')) $s('#commit').onclick = commitGhost;
@@ -1937,6 +1951,102 @@
   }
 
   // GPS: solo funciona donde el navegador lo permite (no dentro de la página publicada en claude.ai).
+  // IA disponible en esta vista (para dictar golpes); se comprueba una vez al arrancar.
+  let aiReady = false;
+  let sampleFn = null;
+  async function getSample() {
+    if (sampleFn) return sampleFn;
+    sampleFn = window.claude && window.claude.use ? await window.claude.use('sample').catch(() => null) : null;
+    return sampleFn;
+  }
+
+  /*
+   * Dictar un golpe: «driver, calle izquierda, quedan 90». La IA solo interpreta el texto (palo, distancia o lo
+   * que queda, lado y lie); la posición la calcula la app sobre la línea a bandera y la busca en la superficie
+   * dicha. Queda como bola provisional para que el jugador la ajuste y confirme.
+   */
+  async function dictateShot(text) {
+    const said = String(text || '').trim();
+    if (!said) return;
+    const n = currentN();
+    const h = holeData(n);
+    const pos = positions(n);
+    const from = pos[pos.length - 1];
+    const sample = await getSample();
+    if (!sample) {
+      toast('La IA no está disponible aquí: toca en el mapa.');
+      return;
+    }
+    const clubs = CLUBS.filter((c) => bagClub(c.id).on).map((c) => `${c.id}=${c.name} (${bagClub(c.id).dist} m)`).join(', ');
+    const btn = app.querySelector('#dictate-form [type="submit"]');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Pensando…';
+    }
+    try {
+      const r = await sample.json(`Un golfista describe dónde quedó su golpe en el hoyo ${n} (par ${h.par}). La bola estaba a ${Math.round(GC.dist(from, h.pin))} m de la bandera, en ${lieName(lastLie(n)).toLowerCase()}.
+Palos de su bolsa (id=nombre): ${clubs}.
+Lo que dice: «${said.replace(/[«»]/g, '')}»
+Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le quedan a bandera o null, "distance": metros que recorrió el golpe o null, "side": "izquierda"|"derecha"|"centro"|null, "lie": "fairway"|"rough"|"sand"|"green"|"water"|"ob"|null}.
+"calle"=fairway, "búnker"/"arena"=sand, "agua"/"lago"=water, "fuera"=ob. No inventes lo que no dice.`, { modelTier: 'quick' });
+      placeDictated(h, from, r || {});
+    } catch (e) {
+      toast(e && e.code === 'not_granted' ? 'Sin permiso para la IA: toca en el mapa.' : 'No se pudo interpretar: prueba otra vez o toca en el mapa.');
+      if (e && ['not_granted', 'sampling_disabled', 'not_declared'].includes(e.code)) {
+        aiReady = false;
+        ui.dictate = false;
+        renderHoleUi();
+      } else if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Colocar';
+      }
+    }
+  }
+
+  function placeDictated(h, from, r) {
+    const L = GC.dist(from, h.pin) || 1;
+    const u = { x: (h.pin.x - from.x) / L, y: (h.pin.y - from.y) / L };
+    const right = { x: -u.y, y: u.x };
+    const club = r.club && CLUBS.some((c) => c.id === r.club) ? r.club : null;
+    let along;
+    if (Number.isFinite(r.toPin)) along = L - r.toPin;
+    else if (Number.isFinite(r.distance)) along = r.distance;
+    else if (club) along = bagClub(club).dist;
+    else along = Math.min(L, 150);
+    along = GC.clamp(along, 2, L + 60);
+    const base = { x: from.x + u.x * along, y: from.y + u.y * along };
+    const lie = LIES.some((l) => l[0] === r.lie) ? r.lie : null;
+    const sides = r.side === 'izquierda' ? [-1] : r.side === 'derecha' ? [1] : [1, -1];
+    let best = null;
+    const at = (k) => ({ x: base.x + right.x * k, y: base.y + right.y * k });
+    if (lie) {
+      // el punto más cercano a la línea, en el lado dicho, que tenga ese lie (hasta 45 m)
+      for (let k = 0; k <= 45 && !best; k += 1.5) {
+        for (const sd of sides) {
+          const p = at(k * sd);
+          if (h.surfaceAt(p.x, p.y) === lie) {
+            best = p;
+            break;
+          }
+        }
+      }
+    }
+    if (!best) best = r.side === 'izquierda' ? at(-10) : r.side === 'derecha' ? at(10) : base;
+    best.x = GC.clamp(best.x, 1, h.width - 1);
+    best.y = GC.clamp(best.y, 1, h.height - 1);
+    ui.ghost = roundPt(best);
+    ui.ghostPath = null;
+    if (club) {
+      ui.selectedClub = club;
+      ui.clubManual = true;
+    }
+    ui.dictate = false;
+    ui.camAuto = false;
+    toast(`${club ? clubName(club) + ' · ' : ''}${lieName(h.surfaceAt(best.x, best.y))}: revisa la bola y confirma.`);
+    drawMap();
+    renderHoleUi();
+  }
+
   function useGps() {
     if (!navigator.geolocation) return;
     toast('Buscando tu posición…');
@@ -1992,6 +2102,8 @@
     teardownMap();
     app.className = 'wrap';
     const avg = clubAverages(rounds);
+    const disp = clubDispersion(rounds);
+    missFor = Object.fromEntries(CLUBS.map((c) => [c.id, measuredMiss(disp[c.id])]).filter((x) => x[1]));
     const count = CLUBS.filter((c) => bagClub(c.id).on).length + 1;
     app.innerHTML = `
       <div class="page-head"><div><span class="eyebrow">Tus palos y tus distancias</span><h1 class="h-display">Mi bolsa</h1>
@@ -2014,6 +2126,17 @@
     CLUBS.forEach((c) => bindClubCard(c, avg[c.id]));
   }
 
+  // Fallo más repetido según los golpes del mapa: lado al que se van los golpes desviados más de 8 m.
+  function measuredMiss(shots) {
+    if (!shots || shots.length < 4) return null;
+    const off = shots.filter((s) => Math.abs(s.lat) > 8);
+    const left = off.filter((s) => s.lat < 0).length;
+    const right = off.length - left;
+    if (off.length < shots.length * 0.4) return { k: 'ninguno', cnt: shots.length - off.length, total: shots.length };
+    return left > right ? { k: 'izquierda', cnt: left, total: shots.length } : { k: 'derecha', cnt: right, total: shots.length };
+  }
+
+  let missFor = {};
   function clubCard(c, measured) {
     const cfg = bagClub(c.id);
     const traced = clubShapes(rounds);
@@ -2031,7 +2154,8 @@
         <div class="field"><label>Vuelo habitual</label>${seg('shape', SHAPES)}
           ${traced[c.id] ? `<div class="row" style="margin-top:8px"><span class="muted measured">trazado: ${shapeName(traced[c.id].top).toLowerCase()} en ${traced[c.id].cnt} de ${traced[c.id].total}</span>${cfg.shape === traced[c.id].top ? '' : `<button class="btn small" data-shape="${traced[c.id].top}">Usar</button>`}</div>` : ''}</div>
         <div class="field"><label>Altura de bola</label>${seg('height', HEIGHTS)}</div>
-        <div class="field"><label>Fallo más repetido</label>${seg('miss', MISSES)}</div>
+        <div class="field"><label>Fallo más repetido</label>${seg('miss', MISSES)}
+          ${missFor[c.id] ? `<div class="row" style="margin-top:8px"><span class="muted measured">medido: ${missFor[c.id].k === 'ninguno' ? 'sin fallo claro' : `a la ${missFor[c.id].k}`} (${missFor[c.id].cnt} de ${missFor[c.id].total})</span>${cfg.miss === missFor[c.id].k ? '' : `<button class="btn small" data-miss="${missFor[c.id].k}">Usar</button>`}</div>` : ''}</div>
       </div>` : ''}
     </div>`;
   }
@@ -2070,6 +2194,8 @@
     if (use) use.onclick = () => { cfg.dist = Number(use.dataset.use); redraw(); };
     const useShape = el.querySelector('[data-shape]');
     if (useShape) useShape.onclick = () => { cfg.shape = useShape.dataset.shape; redraw(); };
+    const useMiss = el.querySelector('[data-miss]');
+    if (useMiss) useMiss.onclick = () => { cfg.miss = useMiss.dataset.miss; redraw(); };
     el.querySelectorAll('.seg[data-f]').forEach((sg) => sg.querySelectorAll('button').forEach((b) => (b.onclick = () => {
       cfg[sg.dataset.f] = b.dataset.k;
       redraw();
@@ -2331,6 +2457,27 @@
     return out;
   }
 
+  // Primer putt: distancia a bandera de la bola en el green (último golpe apuntado) y putts que hicieron falta.
+  function puttStats(list = rounds) {
+    const B = [[0, 2, 'Menos de 2 m'], [2, 5, '2 a 5 m'], [5, 10, '5 a 10 m'], [10, 999, 'Más de 10 m']];
+    const rows = B.map(([a, b, label]) => ({ a, b, label, n: 0, putts: 0, one: 0, three: 0 }));
+    for (const r of list) {
+      for (const n of r.holes) {
+        const hs = r.scores && r.scores[n];
+        if (!hs || !hs.done || !hs.putts || !hs.entries.length) continue;
+        const last = hs.entries[hs.entries.length - 1];
+        if (last.t !== 's' || last.l !== 'green') continue;
+        const d = withRound(r, () => GC.dist(positions(n).pop(), holeData(n).pin));
+        const row = rows.find((x) => d >= x.a && d < x.b);
+        row.n++;
+        row.putts += hs.putts;
+        if (hs.putts === 1) row.one++;
+        if (hs.putts >= 3) row.three++;
+      }
+    }
+    return rows;
+  }
+
   const quant = (xs, q) => {
     const a = xs.slice().sort((x, y) => x - y);
     const i = (a.length - 1) * q;
@@ -2388,6 +2535,15 @@
       <h2 class="section-title">Mapa de tus golpes</h2>
       <div class="seg hole-pick" id="hole-pick">${COURSE.map((h) => `<button data-n="${h.number}" aria-pressed="${h.number === progressHole}">${h.number}</button>`).join('')}</div>
       <div class="shotmap-wrap"><canvas id="shotmap" aria-label="Golpes apuntados en el hoyo ${progressHole}"></canvas><div class="shotmap-info" id="shotmap-info"></div></div>
+
+      <h2 class="section-title">Putts <small>según la distancia del primer putt</small></h2>
+      ${(() => {
+        const PS = puttStats();
+        const tot = PS.reduce((a, x) => a + x.n, 0);
+        if (!tot) return '<p class="empty">Cuando termines hoyos con la bola apuntada en el green verás cuántos putts haces según la distancia.</p>';
+        return `<div class="table-scroll"><table class="score"><thead><tr><th>Primer putt</th><th>Hoyos</th><th>Putts de media</th><th>Con 1 putt</th><th>3 o más</th></tr></thead><tbody>${
+          PS.map((x) => `<tr><td>${x.label}</td><td>${x.n}</td><td>${x.n ? (x.putts / x.n).toFixed(1).replace('.', ',') : '–'}</td><td>${x.n ? pct(x.one, x.n) + ' %' : '–'}</td><td>${x.n ? pct(x.three, x.n) + ' %' : '–'}</td></tr>`).join('')}</tbody></table></div>`;
+      })()}
 
       <h2 class="section-title">Dispersión por palo <small>golpes apuntados en el mapa</small></h2>
       ${clubsWith.length ? `<div class="seg" id="club-pick">${clubsWith.map((c) => `<button data-c="${c.id}" aria-pressed="${c.id === progressClub}">${c.name} <small>${disp[c.id].length}</small></button>`).join('')}</div>
@@ -3027,6 +3183,7 @@ ${brief}`;
 
   let listLoaded = false;
   renderHome();
+  getSample().then((f) => { aiReady = !!f; });
   Store.init().then(async () => {
     const savedBag = await Store.loadBag();
     if (savedBag && savedBag.clubs) {
@@ -3042,7 +3199,7 @@ ${brief}`;
 
   window.__vuelta = {
     get round() { return round; }, get rounds() { return rounds; }, get store() { return Store; }, toUtm30, tapMap: (p) => tapMap(p),
-    mergeRounds, stablefordOf,
+    mergeRounds, stablefordOf, get ui() { return ui; }, lieAt: (p) => holeData(currentN()).surfaceAt(p.x, p.y),
     teeScreen: () => { const pos = positions(currentN()); return GC.worldToScreen(cam, mapView, pos[pos.length - 1]); },
     pinScreen: () => GC.worldToScreen(cam, mapView, holeData(currentN()).pin),
   };

@@ -27,6 +27,12 @@ fallo más repetido. En cada golpe recomienda palo y punto de mira según la dis
 desnivel real del MDT (1 m de subida ≈ 1 m más), viento (+0,62 %/km/h de cara, −0,31 %/km/h a favor; ×1,3 con
 bola alta y ×0,7 con bola baja), temperatura (−0,2 %/°C sobre la de referencia) y deriva por viento cruzado
 y por el vuelo habitual; avisa si el fallo habitual acaba en agua, búnker o fuera de límites.
+**Dictar golpe** (en la página publicada): «hierro 7, rough a la derecha, quedan 40». La IA solo interpreta la frase
+(palo, distancia o lo que queda, lado y lie); la app calcula el punto sobre la línea a bandera, lo busca en esa
+superficie y lo deja como bola provisional para ajustar y confirmar. Con el micrófono del teclado del móvil se dicta.
+En **Mi bolsa**, el fallo más repetido se mide con los golpes del mapa (lado al que se desvían más de 8 m) y en
+**Mi progreso** se ven los putts según la distancia del primer putt (bola apuntada en el green).
+
 **Guardado**: con cuenta, cada cambio se guarda en la base de datos del artefacto y, mientras no se confirma, también en
 el móvil (`localStorage`), así que sin cobertura en el campo no se pierde nada: se reenvía al volver la conexión o al
 reabrir la página. Cada hoyo lleva su marca de tiempo y al guardar se fusiona hoyo a hoyo con lo que haya en la cuenta,

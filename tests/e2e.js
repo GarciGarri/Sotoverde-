@@ -94,6 +94,10 @@ function mockClaude({ withDb, withSample }) {
     opts.onText({ text, delta: text });
     return { text, truncated: false };
   };
+  sample.json = async (input) => {
+    window.__mock.prompts.push(input);
+    return { club: 'h7', toPin: 25, distance: null, side: 'derecha', lie: 'rough' };
+  };
   window.claude = {
     use: async (name) => {
       if (name === 'db') return withDb ? { collection: col, doc: (k) => ref(k) } : null;
@@ -154,6 +158,25 @@ async function main() {
     await p.waitForTimeout(400);
     const r = await p.evaluate(() => window.__vuelta.rounds[0]);
     check(r.scores[1].done && r.scores[1].entries.length === 1 && r.scores[1].putts === 1, 'golpe, putt y hoyo terminado');
+    check(p.errors.length === 0, 'sin errores');
+    await p.context().close();
+  }
+
+  console.log('Dictar un golpe');
+  {
+    const p = await page({ withSample: true });
+    await p.waitForSelector('#start:not([disabled])');
+    await p.click('#start');
+    await p.waitForSelector('#dictate');
+    await p.click('#dictate');
+    await p.fill('#dictate-text', 'hierro 7, rough a la derecha, me quedan 25');
+    await p.click('#dictate-form [type="submit"]');
+    await p.waitForTimeout(500);
+    const g = await p.evaluate(() => {
+      const ui = window.__vuelta.ui;
+      return ui && ui.ghost ? { club: ui.selectedClub, lie: window.__vuelta.lieAt(ui.ghost) } : null;
+    });
+    check(g && g.club === 'h7' && g.lie === 'rough', `la IA coloca la bola y el palo (${JSON.stringify(g)})`);
     check(p.errors.length === 0, 'sin errores');
     await p.context().close();
   }
