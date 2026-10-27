@@ -239,7 +239,9 @@
   }
 
   function makePlayer(container, model, segs, duration, opts) {
-    const player = { container, model, segs, duration, playing: false, t: 0, onEnd: opts.onEnd, data: opts.data || null };
+    const player = {
+      container, model, segs, duration, playing: false, t: 0, onEnd: opts.onEnd, data: opts.data || null, onSegment: opts.onSegment || null,
+    };
     const bar = segs.filter((s) => s.kind !== 'outro' && s.kind !== 'routro');
     container.innerHTML = `
       <canvas class="tour-poster" aria-hidden="true"></canvas>
@@ -748,6 +750,7 @@
     const key = seg + ':' + sub;
     if (player.uiKey !== key) {
       player.uiKey = key;
+      if (player.onSegment) player.onSegment(s.kind === 'play' ? s.hd.n : null);
       if (s.kind === 'intro') caption(player, intro(player.model));
       else if (s.kind === 'rintro' || s.kind === 'routro') caption(player, s.cap);
       else if (s.kind === 'play') caption(player, s.steps[sub].cap);
@@ -1213,5 +1216,12 @@
     return { pos, look: player.W(c.x, c.y, 0), seg, sub: 0 };
   }
 
-  GC.Tour = { mount, replay, dispose, holeInfo, courseModel, lieIconUrl };
+  function pause(player) {
+    if (!player.playing) return;
+    player.playing = false;
+    player.container.classList.replace('playing', 'paused');
+    render(player);
+  }
+
+  GC.Tour = { mount, replay, dispose, pause, holeInfo, courseModel, lieIconUrl };
 })(typeof window !== 'undefined' ? window : globalThis);

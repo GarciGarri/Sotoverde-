@@ -51,6 +51,10 @@ lo que quedaba a bandera, desnivel y vuelo, con un icono del lie (calle, rough, 
 ficha y en la marca 3D donde quedó la bola. Luego las penalizaciones con su drop, los putts y el resultado del
 hoyo; la vuelta empieza y acaba con el resumen (golpes, resultado al par, pares, bogeys, putts, mejor hoyo).
 Los hoyos de tarjetas importadas sin golpes en el mapa se enseñan con su resultado.
+Junto al visor hay un panel de **comentarios con IA**: lo que escribes se guarda en la vuelta marcado con el hoyo
+que estabas viendo (el vídeo se pausa al escribir) y vuelve a salir en la ficha final de ese hoyo. En la página
+publicada, Claude responde como entrenador con los datos de la vuelta (golpes explicados, resultado, bolsa); usa la
+cuenta de Claude de quien lo ve y pide permiso la primera vez. Sin IA disponible, el comentario se guarda igual.
 
 **Modo juego** (`jugar.html`): los mismos hoyos al estilo Golf Clash.
 

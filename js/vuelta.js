@@ -1676,7 +1676,7 @@
       ui.selectedClub = suggestClub(n);
       afterChange();
     };
-    if ($s('#hole3d')) $s('#hole3d').onclick = () => open3D(replayData(round, n));
+    if ($s('#hole3d')) $s('#hole3d').onclick = () => open3D(replayData(round, n), round);
     if ($s('#next2')) $s('#next2').onclick = () => (idx < round.holes.length - 1 ? openHole(idx + 1) : renderCard());
     const tb = $s('#target-btn');
     if (tb) tb.onclick = () => {
@@ -2007,10 +2007,10 @@
         : card ? '' : '<p class="empty">Apunta golpes en el mapa para ver tus distancias por palo.</p>'}
       <p class="foot"><a href="jugar.html">Modo juego</a></p>`;
     app.querySelector('#home').onclick = renderHome;
-    if (app.querySelector('#replay3d')) app.querySelector('#replay3d').onclick = () => open3D(replayData(round));
+    if (app.querySelector('#replay3d')) app.querySelector('#replay3d').onclick = () => open3D(replayData(round), round);
     app.querySelectorAll('.mini3d').forEach((b) => (b.onclick = (e) => {
       e.stopPropagation();
-      open3D(replayData(round, Number(b.dataset.n)));
+      open3D(replayData(round, Number(b.dataset.n)), round);
     }));
     if (card) {
       app.querySelector('#edit-card').onclick = () => {
@@ -2122,7 +2122,7 @@
       end: {
         eyebrow: `Hoyo ${n} · resultado`, title: result,
         line: `${golpes(strokes)}${!card && hs.putts ? ` · ${hs.putts} putt${hs.putts === 1 ? '' : 's'}` : ''}${st.cardDone ? ` · ${signed(d)}` : ''}`,
-        chips, tip: card ? 'Apunta los golpes en el mapa para verlos dibujados.' : '',
+        chips, tip: holeNote(n) || (card ? 'Apunta los golpes en el mapa para verlos dibujados.' : ''),
       },
       steps: card ? [] : steps,
     };
@@ -2169,8 +2169,44 @@
     }
   }
 
-  // Visor a pantalla completa; se cierra con ✕ o Escape y libera la escena.
-  function open3D(data) {
+  // Último comentario del jugador sobre un hoyo (para la ficha final del hoyo en el resumen).
+  function holeNote(n) {
+    const c = (round.chat || []).filter((m) => m.role === 'user' && m.hole === n).pop();
+    return c ? `Tu comentario: «${esc(c.content.length > 140 ? c.content.slice(0, 137) + '…' : c.content)}»` : '';
+  }
+
+  // Texto de la vuelta para la IA: cada hoyo con sus golpes explicados (lo mismo que cuenta el resumen 3D).
+  function roundBrief(r) {
+    const data = replayData(r);
+    const plain = (t) => String(t || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+    const lines = [];
+    const t = totals(r);
+    lines.push(`Vuelta en Golf Sotoverde (par 60), ${fmtDate(r.date)}${r.event ? `, prueba «${r.event}»` : ''}. Barras ${r.tees}.`);
+    lines.push(`Resultado: ${golpes(t.strokes)} en ${t.played} hoyos, ${signed(t.diff)} al par en los terminados.`);
+    if (r.cond) lines.push(`Condiciones: ${r.cond.temp} °C, viento ${r.cond.wind} km/h.`);
+    for (const hd of data.holes) {
+      const steps = hd.steps.map((st) => `   - ${plain(st.cap.title)}: ${plain(st.cap.line)}${st.cap.chips.length ? ` (${st.cap.chips.join(', ')})` : ''}`);
+      lines.push(`Hoyo ${hd.n}: ${plain(hd.header.line)}. Resultado: ${plain(hd.end.title)}, ${plain(hd.end.line)}${hd.end.chips.length ? `; ${hd.end.chips.join(', ')}` : ''}.`);
+      if (steps.length) lines.push(...steps);
+      else lines.push('   (solo el total de la tarjeta, sin golpes apuntados)');
+    }
+    const clubs = CLUBS.filter((c) => bagClub(c.id).on).map((c) => `${c.name} ${bagClub(c.id).dist} m (${bagClub(c.id).shape}, fallo habitual: ${bagClub(c.id).miss})`);
+    if (clubs.length) lines.push(`Bolsa del jugador (distancias habituales): ${clubs.join('; ')}.`);
+    return lines.join('\n').slice(0, 24000);
+  }
+
+  const COACH_RULES = (brief) => `Eres un entrenador de golf que repasa con un jugador amateur su vuelta en el campo Golf Sotoverde (Valladolid). \
+El jugador está viendo un resumen en 3D de la vuelta y te escribe comentarios: qué sintió, qué pasó en un golpe, dudas.
+Responde SIEMPRE en español, breve (2 a 5 frases), cercano y concreto. Relaciona lo que dice con los datos de la vuelta \
+(palos, distancias, lies, putts) y, si viene a cuento, da UN consejo práctico para la próxima vez. No inventes golpes ni datos que no estén abajo; \
+si te falta información, pregunta. Si el comentario es solo una nota (p. ej. «el viento estaba de cara»), confírmala en una frase y relaciónala con el hoyo.
+Cada mensaje del jugador empieza con el hoyo que estaba viendo entre corchetes.
+
+Datos de la vuelta:
+${brief}`;
+
+  // Visor a pantalla completa con comentarios: se cierra con ✕ o Escape y libera la escena.
+  function open3D(data, r) {
     if (!data.holes.length) {
       toast('No hay hoyos jugados para ver en 3D.');
       return;
@@ -2179,17 +2215,171 @@
     modal.className = 'replay-modal';
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-label', 'Resumen en 3D');
-    modal.innerHTML = '<div class="tour replay" id="replay"></div><button class="replay-close" aria-label="Cerrar">✕</button>';
+    modal.innerHTML = `<div class="replay-wrap"><div class="tour replay" id="replay"></div>
+      <aside class="coach" aria-label="Comentarios">
+        <header><b>Comentarios</b><span class="coach-ai">con IA</span></header>
+        <div class="coach-log" aria-live="polite"></div>
+        <div class="coach-quick"></div>
+        <form class="coach-form">
+          <span class="coach-ctx"></span>
+          <textarea rows="2" maxlength="600" placeholder="¿Qué pasó en este hoyo?" aria-label="Tu comentario"></textarea>
+          <div class="coach-row"><span class="coach-note muted"></span><button type="button" class="btn small coach-stop" hidden>Parar</button><button class="btn small primary" type="submit">Enviar</button></div>
+        </form>
+      </aside></div><button class="replay-close" aria-label="Cerrar">✕</button>`;
     document.body.appendChild(modal);
-    const player = GC.Tour.replay(modal.querySelector('#replay'), data, { autoplay: true, button: data.intro ? 'Resumen 3D' : 'Hoyo en 3D' });
+    let hole = data.holes.length === 1 ? data.holes[0].n : null;
+    const coach = modal.querySelector('.coach');
+    const player = GC.Tour.replay(modal.querySelector('#replay'), data, {
+      autoplay: true, button: data.intro ? 'Resumen 3D' : 'Hoyo en 3D',
+      onSegment: (n) => {
+        if (n != null) hole = n;
+        ctx();
+      },
+    });
+    const ctx = () => {
+      coach.querySelector('.coach-ctx').textContent = hole != null ? `Hoyo ${hole}` : 'Vuelta';
+      coach.querySelector('textarea').placeholder = hole != null ? `¿Qué pasó en el hoyo ${hole}?` : '¿Qué tal fue la vuelta?';
+    };
+    ctx();
+    bindCoach(coach, r, () => hole, () => GC.Tour.pause(player));
     const close = () => {
+      if (coach.abort) coach.abort();
       GC.Tour.dispose(player);
       modal.remove();
       document.removeEventListener('keydown', onKey);
     };
-    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    const onKey = (e) => { if (e.key === 'Escape' && document.activeElement.tagName !== 'TEXTAREA') close(); };
     document.addEventListener('keydown', onKey);
     modal.querySelector('.replay-close').onclick = close;
+  }
+
+  const COACH_ERRORS = {
+    not_granted: 'La IA no tiene permiso en esta página; tu comentario queda guardado igualmente.',
+    sampling_disabled: 'La IA no está disponible en tu cuenta; tu comentario queda guardado.',
+    rate_limited: 'Demasiadas consultas seguidas: prueba de nuevo en un rato.',
+    session_expired: 'Vuelve a iniciar sesión en Claude para usar la IA.',
+    refused: 'La IA no ha querido responder a ese comentario.',
+  };
+
+  function bindCoach(coach, r, getHole, pause) {
+    const log = coach.querySelector('.coach-log');
+    const form = coach.querySelector('.coach-form');
+    const box = form.querySelector('textarea');
+    const note = form.querySelector('.coach-note');
+    const stop = form.querySelector('.coach-stop');
+    const send = form.querySelector('[type="submit"]');
+    let sample = null;
+    let disabled = false;
+    let busy = false;
+    if (!r.chat) r.chat = [];
+    const bubble = (m) => {
+      const el = document.createElement('div');
+      el.className = `msg ${m.role}`;
+      if (m.role === 'user') {
+        const tag = document.createElement('span');
+        tag.className = 'msg-hole';
+        tag.textContent = m.hole != null ? `Hoyo ${m.hole}` : 'Vuelta';
+        el.append(tag);
+      }
+      const body = document.createElement('p');
+      body.textContent = m.content;
+      el.append(body);
+      log.append(el);
+      log.scrollTop = log.scrollHeight;
+      return body;
+    };
+    const render = () => {
+      log.textContent = '';
+      if (!r.chat.length) {
+        const p = document.createElement('p');
+        p.className = 'coach-empty';
+        p.textContent = 'Cuenta qué sentiste o qué pasó en cada golpe. Se guarda en la vuelta y la IA lo comenta con tus datos.';
+        log.append(p);
+      }
+      r.chat.forEach(bubble);
+    };
+    render();
+    const quick = coach.querySelector('.coach-quick');
+    for (const q of ['¿Dónde perdí más golpes?', '¿Qué practico esta semana?', 'Resúmeme la vuelta']) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = q;
+      b.onclick = () => ask(q);
+      quick.append(b);
+    }
+    const setBusy = (v) => {
+      busy = v;
+      send.disabled = v;
+      stop.hidden = !v;
+      quick.hidden = v || disabled;
+    };
+    async function ask(text) {
+      const content = text.trim();
+      if (!content || busy) return;
+      pause();
+      const msg = { role: 'user', content, hole: getHole(), at: new Date().toISOString() };
+      if (!r.chat.length) log.textContent = '';
+      r.chat.push(msg);
+      bubble(msg);
+      box.value = '';
+      Store.save(r);
+      if (disabled) return;
+      if (!sample) sample = window.claude && window.claude.use ? await window.claude.use('sample').catch(() => null) : null;
+      if (!sample) {
+        disabled = true;
+        quick.hidden = true;
+        note.textContent = 'Comentario guardado. La IA no está disponible aquí.';
+        return;
+      }
+      const out = bubble({ role: 'assistant', content: 'Pensando…' });
+      out.parentNode.classList.add('pending');
+      const ctl = new AbortController();
+      coach.abort = () => ctl.abort();
+      stop.onclick = () => ctl.abort();
+      setBusy(true);
+      note.textContent = '';
+      // instrucciones + últimos turnos (la IA no recuerda nada entre llamadas)
+      const turns = r.chat.slice(-16).map((m) => ({
+        role: m.role, content: m.role === 'user' ? `[${m.hole != null ? 'Hoyo ' + m.hole : 'Vuelta'}] ${m.content}` : m.content,
+      }));
+      while (turns.length && turns[0].role !== 'user') turns.shift();
+      try {
+        const { text: answer } = await sample([{ role: 'user', content: COACH_RULES(roundBrief(r)) }, ...turns], {
+          cache: false, signal: ctl.signal,
+          onText: ({ text: t }) => { out.textContent = t; out.parentNode.classList.remove('pending'); log.scrollTop = log.scrollHeight; },
+        });
+        out.textContent = answer;
+        r.chat.push({ role: 'assistant', content: answer, at: new Date().toISOString() });
+        if (r.chat.length > 60) r.chat.splice(0, r.chat.length - 60);
+        Store.save(r);
+      } catch (e) {
+        const code = e && e.code;
+        if (e && e.text && code !== 'refused') {
+          out.textContent = e.text;
+          r.chat.push({ role: 'assistant', content: e.text, at: new Date().toISOString() });
+          Store.save(r);
+        } else out.parentNode.remove();
+        if (['not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed'].includes(code)) {
+          disabled = true;
+          quick.hidden = true;
+        }
+        if (code !== 'cancelled') note.textContent = COACH_ERRORS[code] || 'No se pudo contactar con la IA; tu comentario queda guardado.';
+      } finally {
+        coach.abort = null;
+        setBusy(false);
+      }
+    }
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      ask(box.value);
+    };
+    box.onfocus = pause;
+    box.onkeydown = (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        ask(box.value);
+      }
+    };
   }
 
   // ---------- utilidades ----------
