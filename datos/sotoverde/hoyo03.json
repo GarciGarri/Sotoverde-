@@ -1,9 +1,9 @@
 {
  "id": "sotoverde-03",
- "name": "Sotoverde · Hoyo 3",
+ "name": "Sotoverde",
  "number": 3,
  "par": 4,
- "card": "Par 4 · 261 m (barras amarillas) · dog-leg suave a la izquierda; lago detrás del green",
+ "card": "Tarjeta: 261 m desde amarillas · dog-leg suave a la izquierda",
  "geo": {
   "crs": "EPSG:25830",
   "origin": [

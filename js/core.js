@@ -160,6 +160,9 @@
     h.slope = { x: sv.x * k, y: sv.y * k, angle: s.angle || 0, strength: s.strength || 0 };
     h.angle = Math.atan2(h.pin.y - h.tee.y, h.pin.x - h.tee.x);
     h.length = Math.round(GC.dist(h.tee, h.pin));
+    h.elev = GC.makeElevation(raw.elevation);
+    h.heightAt = (x, y) => (h.elev ? h.elev.heightAt(x, y) : 0);
+    h.gradAt = (x, y) => (h.elev ? h.elev.gradAt(x, y) : { x: 0, y: 0 });
 
     h.surfaceAt = function (x, y) {
       if (x < 0 || y < 0 || x > h.width || y > h.height) return 'ob';
@@ -175,6 +178,37 @@
       return null;
     };
     return h;
+  };
+
+  // Rejilla de alturas {cell, cols, rows, base, data[]} → altura y pendiente interpoladas.
+  GC.makeElevation = function (e) {
+    if (!e || !e.data || e.data.length !== e.cols * e.rows) return null;
+    const { cell, cols, rows, data } = e;
+    const at = (i, j) => data[GC.clamp(j, 0, rows - 1) * cols + GC.clamp(i, 0, cols - 1)];
+    const heightAt = (x, y) => {
+      const fx = GC.clamp(x / cell, 0, cols - 1);
+      const fy = GC.clamp(y / cell, 0, rows - 1);
+      const i = Math.min(Math.floor(fx), cols - 2);
+      const j = Math.min(Math.floor(fy), rows - 2);
+      const u = fx - i;
+      const v = fy - j;
+      return (
+        at(i, j) * (1 - u) * (1 - v) + at(i + 1, j) * u * (1 - v) +
+        at(i, j + 1) * (1 - u) * v + at(i + 1, j + 1) * u * v
+      );
+    };
+    const d = cell / 2;
+    const gradAt = (x, y) => ({
+      x: (heightAt(x + d, y) - heightAt(x - d, y)) / (2 * d),
+      y: (heightAt(x, y + d) - heightAt(x, y - d)) / (2 * d),
+    });
+    let min = Infinity;
+    let max = -Infinity;
+    for (const v of data) {
+      min = Math.min(min, v);
+      max = Math.max(max, v);
+    }
+    return { cell, cols, rows, base: e.base || 0, min, max, heightAt, gradAt, shade: null };
   };
 
   GC.makeTree = function (t, i) {
@@ -396,6 +430,8 @@
       ctx.restore();
     }
 
+    if (h.elev) drawRelief(ctx, h);
+
     // árboles: primero las sombras, luego las copas
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
     for (const t of h.trees) {
@@ -422,6 +458,45 @@
       }
     }
   };
+
+  // Sombreado del relieve (luz del noroeste, relieve exagerado para que se aprecie).
+  function drawRelief(ctx, h) {
+    const e = h.elev;
+    if (!e.shade && typeof document !== 'undefined') {
+      const step = 1; // metros por píxel del sombreado
+      const w = Math.ceil(h.width / step);
+      const hg = Math.ceil(h.height / step);
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = hg;
+      const g = c.getContext('2d');
+      const img = g.createImageData(w, hg);
+      const exag = 2;
+      const light = { x: -0.5, y: -0.5, z: 0.7 };
+      const ll = Math.hypot(light.x, light.y, light.z);
+      for (let j = 0; j < hg; j++) {
+        for (let i = 0; i < w; i++) {
+          const gr = e.gradAt(i * step, j * step);
+          const nx = -gr.x * exag;
+          const ny = -gr.y * exag;
+          const nl = Math.hypot(nx, ny, 1);
+          const flat = light.z / ll;
+          const lit = (nx * light.x + ny * light.y + light.z) / (nl * ll) - flat;
+          const k = (j * w + i) * 4;
+          const v = lit > 0 ? 255 : 0;
+          img.data[k] = img.data[k + 1] = img.data[k + 2] = v;
+          img.data[k + 3] = Math.min(60, Math.abs(lit) * 500);
+        }
+      }
+      g.putImageData(img, 0, 0);
+      e.shade = { canvas: c, step };
+    }
+    if (!e.shade) return;
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(e.shade.canvas, 0, 0, e.shade.canvas.width * e.shade.step, e.shade.canvas.height * e.shade.step);
+    ctx.restore();
+  }
 
   // Flechas animadas que muestran la caída del green.
   function drawSlope(ctx, h, time) {
@@ -540,10 +615,10 @@
     return (GC.BUILTIN_HOLES || []).find((h) => h.id === id) || GC.store.get(id);
   };
 
-  // "ejemplos" (por defecto), "mios", "todos" o una lista de ids separada por comas.
+  // "campo" (por defecto: hoyos reales y ejemplos), "mios", "todos" o ids separados por comas.
   GC.resolveHoleList = function (param) {
     const builtin = GC.BUILTIN_HOLES || [];
-    if (!param || param === 'ejemplos') return builtin;
+    if (!param || param === 'campo') return builtin;
     if (param === 'mios') return GC.store.list();
     if (param === 'todos') return builtin.concat(GC.store.list());
     return param.split(',').map(GC.findHole).filter(Boolean);

@@ -5,6 +5,8 @@ const assert = require('assert');
 const path = require('path');
 
 require(path.join(__dirname, '..', 'js', 'core.js'));
+require(path.join(__dirname, '..', 'js', 'physics.js'));
+require(path.join(__dirname, '..', 'js', 'campos.js'));
 require(path.join(__dirname, '..', 'js', 'holes.js'));
 const GC = globalThis.GC;
 

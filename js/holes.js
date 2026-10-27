@@ -61,7 +61,7 @@
     return out;
   }
 
-  GC.BUILTIN_HOLES = [
+  GC.EXAMPLE_HOLES = [
     {
       id: 'ejemplo-1',
       name: 'La Curva',
@@ -135,6 +135,9 @@
       greenSlope: { angle: 80, strength: 0.35 },
     },
   ];
+
+  // Hoyos reales del campo (js/campos.js) primero y después los ejemplos.
+  GC.BUILTIN_HOLES = (GC.COURSE_HOLES || []).concat(GC.EXAMPLE_HOLES);
 
   GC.shapes = { ellipse, ribbon, treeLine };
 })(typeof window !== 'undefined' ? window : globalThis);

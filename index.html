@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Sotoverde Clash</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="menu">
+  <main>
+    <h1>Sotoverde <span>Clash</span></h1>
+    <p class="lead">Hoyos de golf reales en vista cenital, al estilo Golf Clash.</p>
+
+    <div class="toolbar">
+      <a class="btn primary" id="play-selected" href="#">Jugar seleccionados</a>
+      <a class="btn" href="juego.html?hoyos=campo">Jugar todos</a>
+    </div>
+
+    <h2>Campo de Sotoverde</h2>
+    <div class="grid" id="course"></div>
+
+    <h2>Hoyos de ejemplo</h2>
+    <div class="grid" id="examples"></div>
+
+    <h2>Mis hoyos</h2>
+    <div class="grid" id="mine"></div>
+
+    <p class="credits">
+      Ortofoto PNOA y MDT05 © Instituto Geográfico Nacional (CC BY 4.0).
+      Los hoyos de ejemplo son inventados.
+    </p>
+  </main>
+
+  <script src="js/core.js"></script>
+  <script src="js/campos.js"></script>
+  <script src="js/holes.js"></script>
+  <script>
+    (function () {
+      'use strict';
+      const selected = new Set();
+
+      function card(raw, opts) {
+        const el = document.createElement('div');
+        el.className = 'hole-card';
+        const c = document.createElement('canvas');
+        el.appendChild(c);
+        const h = GC.prepareHole(raw);
+        el.insertAdjacentHTML('beforeend', `
+          <div class="info">
+            <b>Hoyo ${raw.number} · ${raw.name}</b>
+            <small>Par ${h.par} · ${h.length} m${raw.card ? ' · ' + raw.card : ''}</small>
+            ${raw.elevation ? '<span><span class="tag">Relieve real</span></span>' : ''}
+            <label><input type="checkbox"> Incluir en la ronda</label>
+          </div>
+          <div class="row">
+            <a class="btn primary" href="juego.html?hoyos=${encodeURIComponent(raw.id)}">Jugar</a>
+            ${opts && opts.removable ? '<button class="btn" data-remove>Borrar</button>' : ''}
+          </div>`);
+        el.querySelector('input').addEventListener('change', (e) => {
+          if (e.target.checked) selected.add(raw.id);
+          else selected.delete(raw.id);
+        });
+        const rm = el.querySelector('[data-remove]');
+        if (rm) rm.addEventListener('click', () => {
+          if (confirm(`¿Borrar "${raw.name}"?`)) {
+            GC.store.remove(raw.id);
+            el.remove();
+          }
+        });
+        requestAnimationFrame(() => {
+          c.width = c.clientWidth * Math.min(devicePixelRatio || 1, 2);
+          c.height = c.clientHeight * Math.min(devicePixelRatio || 1, 2);
+          GC.renderThumb(c, raw);
+        });
+        return el;
+      }
+
+      function fill(id, list, opts, emptyText) {
+        const box = document.getElementById(id);
+        if (!list.length) {
+          box.innerHTML = `<p class="empty">${emptyText}</p>`;
+          return;
+        }
+        list.forEach((h) => box.appendChild(card(h, opts)));
+      }
+
+      fill('course', GC.COURSE_HOLES || [], null, 'Todavía no hay hoyos del campo.');
+      fill('examples', GC.EXAMPLE_HOLES, null, '');
+      fill('mine', GC.store.list(), { removable: true }, 'Aún no has guardado hoyos propios.');
+
+      document.getElementById('play-selected').addEventListener('click', (e) => {
+        e.preventDefault();
+        const ids = selected.size ? [...selected] : (GC.COURSE_HOLES || []).map((h) => h.id);
+        location.href = 'juego.html?hoyos=' + encodeURIComponent(ids.join(','));
+      });
+    })();
+  </script>
+</body>
+</html>

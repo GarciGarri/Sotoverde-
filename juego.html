@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Sotoverde Clash · Juego</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="game">
+  <canvas id="game"></canvas>
+
+  <header class="hud-top">
+    <div class="hud-hole">
+      <div class="hud-number" id="hud-number">1</div>
+      <div>
+        <div class="hud-name" id="hud-name">Hoyo</div>
+        <div class="hud-sub" id="hud-sub">Par 4 · 0 m</div>
+      </div>
+    </div>
+    <div class="hud-stats">
+      <div><span class="label">Golpe</span><b id="hud-stroke">1</b></div>
+      <div><span class="label">Bandera</span><b id="hud-dist">0 m</b></div>
+      <div><span class="label">Lie</span><b id="hud-lie">Tee</b></div>
+    </div>
+    <div class="hud-wind" title="Viento">
+      <canvas id="wind" width="64" height="64"></canvas>
+      <b id="hud-wind">0 km/h</b>
+    </div>
+  </header>
+
+  <div class="hud-side">
+    <button id="btn-view" class="round" title="Ver el hoyo entero (V)">🔭</button>
+    <button id="btn-exit" class="round" title="Salir">✕</button>
+  </div>
+
+  <footer class="hud-bottom">
+    <div class="spin" id="spin">
+      <button data-spin="-1" title="Efecto atrás">⟲ Atrás</button>
+      <button data-spin="0" class="on">Normal</button>
+      <button data-spin="1" title="Efecto adelante">Adelante ⟳</button>
+    </div>
+    <div class="clubs" id="clubs"></div>
+  </footer>
+
+  <div class="toast" id="toast"></div>
+  <div class="hint" id="hint"></div>
+
+  <div class="modal hidden" id="modal">
+    <div class="card" id="modal-card"></div>
+  </div>
+
+  <script src="js/core.js"></script>
+  <script src="js/physics.js"></script>
+  <script src="js/campos.js"></script>
+  <script src="js/holes.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

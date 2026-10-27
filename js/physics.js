@@ -7,6 +7,10 @@
   const GC = (global.GC = global.GC || {});
 
   const WIND_FACTOR = 0.35;
+  GC.ROLL_GRAVITY = 9.81 * (5 / 7); // aceleración de una bola rodando por unidad de pendiente
+
+  // Distancia que "juega" un golpe: la recta más el desnivel (1 m de subida ≈ 1 m más).
+  GC.playsLike = (h, from, to) => GC.dist(from, to) + (h.heightAt(to.x, to.y) - h.heightAt(from.x, from.y));
 
   // Vector de viento en m/s a partir de {speed km/h, angle brújula}.
   GC.windVector = (wind) => {
@@ -107,8 +111,13 @@
         roll.vy -= (roll.vy / speed) * dec;
       }
       if (surf === 'green') {
+        // en el green manda el plano ajustado (el MDT de 5 m es demasiado grueso)
         roll.vx += h.slope.x * step;
         roll.vy += h.slope.y * step;
+      } else if (h.elev && surf !== 'sand') {
+        const g = h.gradAt(roll.x, roll.y);
+        roll.vx -= GC.ROLL_GRAVITY * g.x * step;
+        roll.vy -= GC.ROLL_GRAVITY * g.y * step;
       }
       roll.x += roll.vx * step;
       roll.y += roll.vy * step;
