@@ -505,3 +505,30 @@ table.score tr.t-over td { background: rgba(200, 50, 42, 0.06); }
   .coach-form textarea { height: 44px; }
   .replay-modal { padding: 0; }
 }
+
+/* botón 3D en el rótulo de cada vuelta */
+.round-row.has-3d { position: relative; padding-right: 86px; }
+.round-row .r3d {
+  position: absolute; top: 14px; right: 14px; display: inline-flex; align-items: center; gap: 2px;
+  padding: 8px 12px; border: 0; border-radius: 999px; background: var(--pine); color: #fff;
+  font: 800 15px/1 var(--font-display); letter-spacing: 0.06em; cursor: pointer; box-shadow: 0 4px 12px rgba(15, 58, 36, 0.25);
+}
+.round-row .r3d:hover { background: var(--forest); }
+.round-row .r3d .play3d { border-width: 5px 0 5px 8px; margin-right: 6px; color: var(--lime); }
+
+/* deslizar entre hoyos */
+.tour { touch-action: pan-y; }
+.tour:focus-visible { outline: 3px solid var(--lime); outline-offset: 2px; }
+.tour.swipe-l .tour-cap { animation: swipe-l 0.35s ease-out; }
+.tour.swipe-r .tour-cap { animation: swipe-r 0.35s ease-out; }
+@keyframes swipe-l { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes swipe-r { from { transform: translateX(-40px); opacity: 0; } to { transform: none; opacity: 1; } }
+.tour-hint {
+  position: absolute; z-index: 4; top: 38%; left: 50%; transform: translate(-50%, -50%); pointer-events: none; white-space: nowrap;
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 999px;
+  background: rgba(10, 30, 18, 0.72); color: #fff; font: 600 14px/1 var(--font-body); transition: opacity 0.6s;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.tour-hint span { font: 800 22px/1 var(--font-display); color: var(--lime); }
+.tour-hint.out { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .tour.swipe-l .tour-cap, .tour.swipe-r .tour-cap { animation: none; } }

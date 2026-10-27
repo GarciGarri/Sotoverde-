@@ -43,14 +43,15 @@ agua, búnkeres y un consejo. Se puede pausar y saltar de tramo.
 `tools/campo_3d.py` genera `js/campo3d.js`, las texturas de `img/` y `datos/sotoverde/campo3d_control.jpg`
 (control de lo extraído sobre la ortofoto). Alturas de los edificios supuestas (casas 5,6 m más tejado).
 
-**Resumen 3D**: en la tarjeta, «Resumen 3D» repasa la vuelta en la misma escena del recorrido 3D y el botón «3D»
+**Resumen 3D**: en la lista de vueltas (botón «3D» de cada vuelta) y en la tarjeta, «Resumen 3D» repasa la vuelta en la misma escena del recorrido 3D y el botón «3D»
 de cada fila (o «Ver en 3D» al terminar un hoyo) repasa un solo hoyo. La cámara se pone detrás de la bola en
 cada golpe, la bola vuela con su estela (siguiendo la línea trazada si el golpe se dibujó; en rojo si acabó en
 agua o fuera), queda una marca numerada donde paró y una ficha explica el golpe: palo, metros, de dónde a dónde,
 lo que quedaba a bandera, desnivel y vuelo, con un icono del lie (calle, rough, búnker, green, agua, fuera) en la
 ficha y en la marca 3D donde quedó la bola. Luego las penalizaciones con su drop, los putts y el resultado del
 hoyo; la vuelta empieza y acaba con el resumen (golpes, resultado al par, pares, bogeys, putts, mejor hoyo).
-Los hoyos de tarjetas importadas sin golpes en el mapa se enseñan con su resultado.
+Los hoyos de tarjetas importadas sin golpes en el mapa se enseñan con su resultado. Deslizando a izquierda o derecha
+(o con las flechas del teclado) se pasa al hoyo siguiente o anterior.
 Junto al visor hay un panel de **comentarios con IA**: lo que escribes se guarda en la vuelta marcado con el hoyo
 que estabas viendo (el vídeo se pausa al escribir) y vuelve a salir en la ficha final de ese hoyo. En la página
 publicada, Claude responde como entrenador con los datos de la vuelta (golpes explicados, resultado, bolsa); usa la

@@ -261,8 +261,54 @@
     container.querySelectorAll('.tour-bar .tb').forEach((b) => (b.onclick = () => action(player, b.dataset.a)));
     container.querySelectorAll('.tour-prog span').forEach((s) => (s.onclick = () => seekSeg(player, Number(s.dataset.seg))));
     caption(player, opts.first);
+    bindSwipe(player);
     if (opts.autoplay) start(player);
     return player;
+  }
+
+  // Deslizar a izquierda o derecha pasa al tramo (hoyo) siguiente o anterior; también las flechas del teclado.
+  function bindSwipe(player) {
+    const c = player.container;
+    let start = null;
+    c.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button, .tour-bar')) return;
+      start = { x: e.clientX, y: e.clientY };
+    });
+    c.addEventListener('pointercancel', () => (start = null));
+    c.addEventListener('pointerup', (e) => {
+      if (!start) return;
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      start = null;
+      if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+      swipeTo(player, dx < 0 ? 1 : -1);
+    });
+    c.tabIndex = 0;
+    c.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      swipeTo(player, e.key === 'ArrowRight' ? 1 : -1);
+    });
+    if (player.data && player.segs.length > 1) {
+      const hint = document.createElement('div');
+      hint.className = 'tour-hint';
+      hint.innerHTML = '<span>‹</span>Desliza para cambiar de hoyo<span>›</span>';
+      c.append(hint);
+      setTimeout(() => hint.classList.add('out'), 3800);
+      setTimeout(() => hint.remove(), 4600);
+    }
+  }
+
+  function swipeTo(player, dir) {
+    const { seg } = segmentAt(player, player.t);
+    const last = player.segs.length - 1;
+    const to = GC.clamp(seg + dir, 0, last);
+    if (to === seg) return;
+    const c = player.container;
+    c.classList.remove('swipe-l', 'swipe-r');
+    void c.offsetWidth;
+    c.classList.add(dir > 0 ? 'swipe-l' : 'swipe-r');
+    seekSeg(player, to);
   }
 
   // Libera la escena WebGL (los navegadores limitan cuántos contextos puede haber a la vez).

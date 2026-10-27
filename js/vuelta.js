@@ -675,7 +675,9 @@
       const t = totals(r);
       const route = ROUTES.find((x) => x[0] === r.route);
       const tee = TEES.find((x) => x[0] === r.tees);
-      return `<div class="round-row" data-id="${esc(r.id)}">
+      const r3d = t.played && GC.Tour && GC.COURSE_3D
+        ? `<button class="r3d" data-act="3d" aria-label="Ver el resumen 3D de la vuelta del ${esc(fmtDate(r.date))}"><span class="play3d" aria-hidden="true"></span>3D</button>` : '';
+      return `<div class="round-row${r3d ? ' has-3d' : ''}" data-id="${esc(r.id)}">${r3d}
         <div class="score num${t.diff < 0 ? ' under' : ''}">${t.played ? t.strokes : '–'}<small>${t.played ? signed(t.diff) : '·'}</small></div>
         <div class="title">${esc(fmtDate(r.date))}${r.finished ? '' : '<span class="pill">En curso</span>'}${isImported(r) ? '<span class="pill soft">Tarjeta</span>' : ''}</div>
         <div class="meta">${isImported(r) ? `${esc(r.event || 'Competición')} · ` : `${route ? route[1] : ''} · `}${tee ? tee[1] : r.tees} · ${t.played} hoyo${t.played === 1 ? '' : 's'} jugado${t.played === 1 ? '' : 's'}</div>
@@ -690,6 +692,10 @@
       row.querySelectorAll('button').forEach((b) => {
         b.onclick = async () => {
           const act = b.dataset.act;
+          if (act === '3d') {
+            open3D(replayData(r), r);
+            return;
+          }
           if (act === 'del') {
             if (!b.dataset.armed) {
               b.dataset.armed = '1';
