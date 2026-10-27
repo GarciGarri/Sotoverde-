@@ -67,9 +67,13 @@
         });
         const rm = el.querySelector('[data-remove]');
         if (rm) rm.addEventListener('click', () => {
-          if (confirm(`¿Borrar "${raw.name}"?`)) {
+          // primer toque pide confirmación, el segundo borra
+          if (rm.dataset.armed) {
             GC.store.remove(raw.id);
             el.remove();
+          } else {
+            rm.dataset.armed = '1';
+            rm.textContent = '¿Seguro? Toca otra vez';
           }
         });
         requestAnimationFrame(() => {

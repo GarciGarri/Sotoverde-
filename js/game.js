@@ -341,7 +341,9 @@
   });
 
   $('#btn-view').addEventListener('click', () => g && (g.overview = !g.overview));
-  $('#btn-exit').addEventListener('click', () => (location.href = exitUrl));
+  // volver atrás conserva la página de origen aunque no se llame index.html
+  const exit = () => (params.get('volver') || history.length <= 1 ? (location.href = exitUrl) : history.back());
+  $('#btn-exit').addEventListener('click', exit);
 
   // ---------- Golpes ----------
 
@@ -482,7 +484,7 @@
         <button id="m-menu">Menú</button>
         <button id="m-replay" class="primary">Jugar otra vez</button>
       </div>`);
-    $('#m-menu').onclick = () => (location.href = exitUrl);
+    $('#m-menu').onclick = exit;
     $('#m-replay').onclick = () => {
       closeModal();
       round.cards = [];
