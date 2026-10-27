@@ -308,7 +308,7 @@
     selectedClub: null, clubManual: false, editIndex: null, moveIndex: null, pendingDrop: false,
     cam: null, // cámara manual (zoom/arrastre); null = encuadre automático bola-green
     loupe: null, // punto bajo el dedo mientras se mantiene pulsado
-    target: null, pickTarget: false, condOpen: false,
+    target: null, pickTarget: false, ghost: null, more: false, putting: false,
   };
 
   const prepared = {};
@@ -472,9 +472,18 @@
       ? 'Tus vueltas se guardan en tu cuenta y solo las ves tú.'
       : 'Sin conexión a tu cuenta: las vueltas se guardan solo en este navegador.';
     app.className = 'wrap';
+    // metros de tarjeta (el hoyo 6 tiene codo: la recta tee-bandera se queda corta)
+    const yards = COURSE.reduce((a, h) => {
+      const m = /Tarjeta:\s*(\d+)\s*m/.exec(h.card || '');
+      return a + (m ? Number(m[1]) : Math.round(GC.dist(GC.toPoint(h.tee), GC.toPoint(h.pin))));
+    }, 0);
     app.innerHTML = `
-      <header class="brand">
-        <h1>Mis vueltas</h1><span>Golf Sotoverde · par 60</span>
+      <header class="hero"><canvas id="hero-map" aria-hidden="true"></canvas>
+        <div class="hero-in">
+          <span class="eyebrow">Golf Sotoverde · Arroyo de la Encomienda</span>
+          <h1 class="h-display">Mis vueltas</h1>
+          <div class="hero-facts"><span><b>${COURSE.length}</b>hoyos</span><span><b>${COURSE.reduce((a, h) => a + h.par, 0)}</b>par</span><span><b>${yards.toLocaleString('es-ES')}</b>m desde amarillas</span></div>
+        </div>
       </header>
       <p class="storage-note">${storage}</p>
 
@@ -488,18 +497,15 @@
           <div class="seg" id="f-route">${ROUTES.map(([k, l]) =>
             `<button type="button" data-k="${k}" aria-pressed="${form.route === k}">${l}</button>`).join('')}</div>
         </div>
-        ${condControls(form, 'f-')}
-        <div><button class="btn primary" id="start" ${listLoaded ? '' : 'disabled'}>Empezar vuelta</button></div>
+        <div class="cond-grid">${condControls(form, 'f-')}</div>
+        <div><button class="btn primary hero-btn" id="start" ${listLoaded ? '' : 'disabled'}>Empezar vuelta</button></div>
       </div>
 
-      <h2 class="section-title">Mi bolsa</h2>
-      <div class="panel stack">
-        <p class="bag-summary">${CLUBS.filter((c) => bagClub(c.id).on).map((c) => `<span><b>${c.name}</b> <span class="num">${bagClub(c.id).dist}</span></span>`).join('') || '<span class="muted">Sin palos.</span>'}</p>
-        <div><button class="btn" id="bag">Editar mi bolsa</button></div>
-      </div>
-
-      <h2 class="section-title">Vueltas</h2>
+      <h2 class="section-title">Tus vueltas <small id="count"></small></h2>
       <div class="rounds" id="list"><p class="empty">Cargando tus vueltas…</p></div>
+
+      <h2 class="section-title">Mi bolsa <button class="btn small" id="bag">Editar</button></h2>
+      <div class="bag-summary">${CLUBS.filter((c) => bagClub(c.id).on).map((c) => `<span><b>${bagClub(c.id).dist}</b>${c.name}</span>`).join('') || '<span>Sin palos</span>'}</div>
 
       <p class="foot"><a href="jugar.html">Modo juego (estilo Golf Clash)</a>
         <span>Mapas: ortofoto y MDT © IGN · contorno © OpenStreetMap</span></p>`;
@@ -514,14 +520,40 @@
       openHole(0);
     };
     renderList();
+    renderHero();
+  }
+
+  // Portada: el hoyo 9 (salida sobre el lago) de lado a lado, del tee a la izquierda al green a la derecha.
+  function renderHero() {
+    const cv = app.querySelector('#hero-map');
+    const raw = byNumber[9] || COURSE[0];
+    if (!cv || !raw) return;
+    const r = cv.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = Math.round(r.width * dpr);
+    cv.height = Math.round(r.height * dpr);
+    const c = cv.getContext('2d');
+    const h = GC.prepareHole(raw, 'amarillas');
+    const rot = -h.angle;
+    const camH = GC.fitCamera([h.tee, h.pin], rot, { w: r.width * 1.05, h: r.height * 0.8 }, 30, 0.1, 30);
+    const v = { cx: r.width / 2, cy: r.height * 0.42 };
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.save();
+    GC.applyCamera(c, camH, v);
+    GC.renderHole(c, h, 0, {});
+    c.restore();
+    const p = GC.worldToScreen(camH, v, h.pin);
+    GC.drawFlag(c, p.x, p.y, 0.9, 0.4, 3);
   }
 
   function renderList() {
     const box = app.querySelector('#list');
     if (!box) return;
     if (!listLoaded) return;
+    const cnt = app.querySelector('#count');
+    if (cnt) cnt.textContent = rounds.length ? `${rounds.length} vuelta${rounds.length === 1 ? '' : 's'}` : '';
     if (!rounds.length) {
-      box.innerHTML = '<p class="empty">Aún no hay vueltas. Elige barras y recorrido y pulsa «Empezar vuelta»: en cada hoyo tocas en el mapa dónde quedó la bola.</p>';
+      box.innerHTML = '<p class="empty">Aún no hay vueltas. Elige barras y recorrido y pulsa «Empezar vuelta»: en cada hoyo tocas en el mapa dónde quedó la bola y confirmas.</p>';
       return;
     }
     const sorted = rounds.slice().sort((a, b) => b.date.localeCompare(a.date));
@@ -530,9 +562,9 @@
       const route = ROUTES.find((x) => x[0] === r.route);
       const tee = TEES.find((x) => x[0] === r.tees);
       return `<div class="round-row" data-id="${esc(r.id)}">
+        <div class="score num${t.diff < 0 ? ' under' : ''}">${t.played ? t.strokes : '–'}<small>${t.played ? signed(t.diff) : '·'}</small></div>
         <div class="title">${esc(fmtDate(r.date))}${r.finished ? '' : '<span class="pill">En curso</span>'}</div>
-        <div class="meta">${route ? route[1] : ''} · ${tee ? tee[1] : r.tees} · ${t.played} hoyo${t.played === 1 ? '' : 's'} jugados</div>
-        <div class="score num">${t.played ? t.strokes : '–'}<small>${t.played ? signed(t.diff) + ' al par' : 'sin golpes'}</small></div>
+        <div class="meta">${route ? route[1] : ''} · ${tee ? tee[1] : r.tees} · ${t.played} hoyo${t.played === 1 ? '' : 's'} jugado${t.played === 1 ? '' : 's'}</div>
         <div class="actions">
           <button class="btn small primary" data-act="open">${r.finished ? 'Ver tarjeta' : 'Continuar'}</button>
           ${r.finished ? '<button class="btn small" data-act="edit">Editar golpes</button>' : '<button class="btn small" data-act="card">Tarjeta</button>'}
@@ -569,8 +601,10 @@
   let canvas = null;
   let ctx = null;
   let cam = null;
-  let mapView = { cx: 0, cy: 0 };
+  let mapView = { cx: 0, cy: 0, w: 1, h: 1 };
+  let insets = { top: 90, bottom: 260 };
   let resizeObs = null;
+  let baseCanvas = null;
 
   function teardownMap() {
     if (resizeObs) resizeObs.disconnect();
@@ -580,59 +614,58 @@
 
   function openHole(idx) {
     round.cur = idx;
-    ui.editIndex = null;
-    ui.moveIndex = null;
-    ui.pendingDrop = false;
-    ui.cam = null;
-    ui.loupe = null;
+    Object.assign(ui, {
+      editIndex: null, moveIndex: null, pendingDrop: false, cam: null, loupe: null, ghost: null,
+      target: null, pickTarget: false, clubManual: false, more: false, putting: false,
+    });
     const n = round.holes[idx];
     ui.selectedClub = suggestClub(n);
     view = 'hole';
     app.className = 'hole-view';
     app.innerHTML = `
-      <div class="hole-bar">
+      <div class="map-wrap" id="map"><canvas aria-label="Mapa del hoyo: toca dónde quedó la bola"></canvas></div>
+      <header class="hv-top glass" id="top">
         <button class="nav" id="prev" aria-label="Hoyo anterior">‹</button>
-        <div class="hole-id" id="hole-id"></div>
-        <div class="total" id="total"></div>
+        <div class="hv-id" id="hole-id"></div>
+        <div class="hv-score" id="total"></div>
         <button class="nav" id="next" aria-label="Hoyo siguiente">›</button>
+      </header>
+      <div class="hv-left">
+        <button class="chipbtn glass" id="go-home">‹ Vueltas</button>
+        <button class="chipbtn glass" id="go-card">Tarjeta</button>
+        <div class="chipbtn glass" id="wind" hidden></div>
       </div>
-      <div class="map-wrap" id="map">
-        <canvas></canvas>
-        <div class="map-tools">
-          <button id="zoom-in" aria-label="Acercar">+</button>
-          <button id="zoom-out" aria-label="Alejar">−</button>
-          <button id="zoom-all" aria-label="Ver el hoyo entero">Todo</button>
-          <button id="zoom-auto" aria-label="Encuadre automático de bola y green">Auto</button>
-          <button id="gps" aria-label="Usar mi posición">GPS</button>
-        </div>
-        <div class="map-hint" id="hint"></div>
+      <div class="map-tools glass">
+        <button class="z" id="zoom-in" aria-label="Acercar">+</button>
+        <button class="z" id="zoom-out" aria-label="Alejar">−</button>
+        <button id="zoom-all" aria-label="Ver el hoyo entero">TODO</button>
+        <button id="zoom-auto" aria-label="Encuadre automático de bola y green">AUTO</button>
+        <button id="gps" aria-label="Usar mi posición">GPS</button>
       </div>
-      <div class="sheet" id="sheet"></div>`;
+      <section class="hv-sheet" id="sheet" aria-label="Golpes del hoyo"></section>`;
     canvas = app.querySelector('canvas');
     ctx = canvas.getContext('2d');
     app.querySelector('#prev').onclick = () => idx > 0 && openHole(idx - 1);
     app.querySelector('#next').onclick = () => (idx < round.holes.length - 1 ? openHole(idx + 1) : renderCard());
+    app.querySelector('#go-home').onclick = renderHome;
+    app.querySelector('#go-card').onclick = renderCard;
     app.querySelector('#zoom-in').onclick = () => zoomBy(1.6);
     app.querySelector('#zoom-out').onclick = () => zoomBy(1 / 1.6);
-    app.querySelector('#zoom-all').onclick = () => {
-      ui.cam = allCamera();
-      drawMap();
-    };
-    app.querySelector('#zoom-auto').onclick = () => {
-      ui.cam = null;
-      drawMap();
-    };
+    app.querySelector('#zoom-all').onclick = () => { ui.cam = allCamera(); drawMap(); };
+    app.querySelector('#zoom-auto').onclick = () => { ui.cam = null; drawMap(); };
     app.querySelector('#gps').onclick = useGps;
     if (!('geolocation' in navigator)) app.querySelector('#gps').hidden = true;
     bindMap();
-    const wrap = app.querySelector('#map');
     resizeObs = new ResizeObserver(() => sizeCanvas());
-    resizeObs.observe(wrap);
-    sizeCanvas();
+    resizeObs.observe(app.querySelector('#map'));
+    resizeObs.observe(app.querySelector('#sheet'));
+    resizeObs.observe(app.querySelector('#top'));
     renderHoleUi();
+    sizeCanvas();
     Store.save(round);
   }
 
+  // El mapa ocupa toda la pantalla; el encuadre usa la franja visible entre la cabecera y el panel.
   function sizeCanvas() {
     if (!canvas) return;
     const r = canvas.parentElement.getBoundingClientRect();
@@ -640,7 +673,14 @@
     canvas.width = Math.max(1, Math.round(r.width * dpr));
     canvas.height = Math.max(1, Math.round(r.height * dpr));
     canvas.dataset.dpr = dpr;
-    mapView = { cx: r.width / 2, cy: r.height / 2 - 22, w: r.width, h: r.height };
+    const top = app.querySelector('#top');
+    const sheet = app.querySelector('#sheet');
+    insets = {
+      top: top ? top.getBoundingClientRect().bottom - r.top + 8 : 90,
+      bottom: sheet ? r.bottom - sheet.getBoundingClientRect().top + 8 : 260,
+    };
+    const visible = Math.max(120, r.height - insets.top - insets.bottom);
+    mapView = { cx: r.width / 2, cy: insets.top + visible / 2, w: r.width, h: r.height };
     drawMap();
   }
 
@@ -651,7 +691,7 @@
   const MAX_ZOOM = 40; // px por metro
 
   function mapRect() {
-    return { w: mapView.w - 40, h: mapView.h - 110 }; // deja libre la franja del aviso inferior
+    return { w: mapView.w - 120, h: Math.max(100, mapView.h - insets.top - insets.bottom - 44) };
   }
 
   function allCamera() {
@@ -664,17 +704,17 @@
     const n = currentN();
     const h = holeData(n);
     const all = allCamera();
-    const pts = positions(n).concat([h.pin]);
+    const pts = positions(n).concat([h.pin], ui.ghost ? [ui.ghost] : []);
     return GC.fitCamera(pts, all.rot, mapRect(), 30, all.zoom, 14);
   }
 
   // Cámara con el zoom dado que deja el punto del mundo `w` bajo el punto de pantalla `p`.
   function cameraKeeping(w, p, zoom, rot) {
-    const minZ = allCamera().zoom * 0.7;
-    const z = GC.clamp(zoom, minZ, MAX_ZOOM);
+    const z = GC.clamp(zoom, allCamera().zoom * 0.7, MAX_ZOOM);
     const off = GC.screenToWorld({ x: 0, y: 0, zoom: z, rot }, mapView, p);
     return { x: w.x - off.x, y: w.y - off.y, zoom: z, rot };
   }
+
 
   function zoomBy(f, p) {
     const c = fitCamera();
@@ -682,6 +722,8 @@
     ui.cam = cameraKeeping(GC.screenToWorld(c, mapView, at), at, c.zoom * f, c.rot);
     drawMap();
   }
+
+  const FONT = (w, px) => `${w} ${px}px 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif`;
 
   function drawMap() {
     if (!canvas || view !== 'hole') return;
@@ -699,83 +741,100 @@
 
     const w2s = (p) => GC.worldToScreen(cam, mapView, p);
     const pin = w2s(h.pin);
-    GC.drawFlag(ctx, pin.x, pin.y, GC.clamp(cam.zoom / 7, 0.5, 1.1), 0, 2);
-
     const hs = holeScore(n);
     const pos = positions(n);
-    // trayectoria
-    ctx.save();
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-    ctx.setLineDash([]);
-    for (let i = 1; i < pos.length; i++) {
-      const a = w2s(pos[i - 1]);
-      const b = w2s(pos[i]);
-      if (a.x === b.x && a.y === b.y) continue;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
-      const d = GC.dist(pos[i - 1], pos[i]);
-      if (d >= 8) pill(`${Math.round(d)} m`, (a.x + b.x) / 2, (a.y + b.y) / 2);
-    }
-    ctx.restore();
-    // tee
-    const t = w2s(pos[0]);
-    dot(t.x, t.y, '#f2cf3c', 'T', false);
-    // golpes
-    hs.entries.forEach((e, i) => {
-      if (e.x == null) return;
-      const p = w2s(e);
-      const sel = ui.editIndex === i;
-      dot(p.x, p.y, e.t === 'p' ? '#d6342c' : '#ffffff', String(i + 1), sel);
-    });
-    // distancia a bandera desde la posición actual
     const cur = pos[pos.length - 1];
-    if (hs.entries.length && !hs.done) {
-      const c = w2s(cur);
-      ctx.save();
-      ctx.strokeStyle = 'rgba(255,216,74,0.9)';
-      ctx.setLineDash([6, 6]);
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(c.x, c.y);
-      ctx.lineTo(pin.x, pin.y);
-      ctx.stroke();
-      ctx.restore();
-    }
+
+    // recomendación: línea de mira y cruz
     const rec = recommend(n);
-    if (rec) {
+    if (rec && !ui.ghost) {
       const a = w2s(rec.aim);
       const f = w2s(rec.from);
       ctx.save();
-      ctx.strokeStyle = 'rgba(120,200,255,0.95)';
+      ctx.strokeStyle = 'rgba(168,214,114,0.95)';
       ctx.lineWidth = 2;
-      ctx.setLineDash([3, 5]);
+      ctx.setLineDash([2, 6]);
+      ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(f.x, f.y);
       ctx.lineTo(a.x, a.y);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.beginPath();
-      ctx.arc(a.x, a.y, 9, 0, Math.PI * 2);
-      ctx.moveTo(a.x - 14, a.y);
-      ctx.lineTo(a.x + 14, a.y);
-      ctx.moveTo(a.x, a.y - 14);
-      ctx.lineTo(a.x, a.y + 14);
+      ctx.arc(a.x, a.y, 11, 0, Math.PI * 2);
+      ctx.moveTo(a.x - 17, a.y);
+      ctx.lineTo(a.x - 6, a.y);
+      ctx.moveTo(a.x + 6, a.y);
+      ctx.lineTo(a.x + 17, a.y);
+      ctx.moveTo(a.x, a.y - 17);
+      ctx.lineTo(a.x, a.y - 6);
+      ctx.moveTo(a.x, a.y + 6);
+      ctx.lineTo(a.x, a.y + 17);
       ctx.stroke();
-      if (ui.target) {
-        const t = w2s(ui.target);
-        ctx.fillStyle = 'rgba(120,200,255,0.35)';
-        ctx.beginPath();
-        ctx.arc(t.x, t.y, 6, 0, Math.PI * 2);
-        ctx.fill();
-      }
       ctx.restore();
     }
-    drawWind();
-    app.querySelector('#zoom-auto').setAttribute('aria-pressed', String(!ui.cam));
-    // copia del mapa para dibujar la lupa encima sin volver a pintar el hoyo
+    if (ui.target) {
+      const t = w2s(ui.target);
+      ctx.save();
+      ctx.strokeStyle = '#a8d672';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, 7, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    GC.drawFlag(ctx, pin.x, pin.y, GC.clamp(cam.zoom / 7, 0.55, 1.15), 0, 2.5);
+
+    // trayectorias: arcos con sombra, como el vuelo de la bola
+    for (let i = 1; i < pos.length; i++) arc(w2s(pos[i - 1]), w2s(pos[i]), GC.dist(pos[i - 1], pos[i]), false);
+    marker(w2s(pos[0]), 'T', 'tee', false);
+    hs.entries.forEach((e, i) => {
+      if (e.x == null) return;
+      marker(w2s(e), String(i + 1), e.t === 'p' ? 'pen' : 'shot', ui.editIndex === i);
+    });
+
+    // bola provisional
+    if (ui.ghost) {
+      const from = ui.moveIndex != null ? pos[ui.moveIndex] : cur;
+      const gp = w2s(ui.ghost);
+      if (!ui.pendingDrop) arc(w2s(from), gp, GC.dist(from, ui.ghost), true);
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.beginPath();
+      ctx.arc(gp.x, gp.y, 26, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#0f3a24';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(gp.x, gp.y, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      const lie = lieName(detectLie(h, ui.ghost.x, ui.ghost.y));
+      tag(ui.pendingDrop ? `Drop · ${lie}` : `${lie} · ${Math.round(GC.dist(from, ui.ghost))} m`, gp.x, gp.y - 42, true);
+    } else if (hs.entries.length && !hs.done) {
+      const c = w2s(cur);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.setLineDash([5, 6]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(c.x, c.y);
+      ctx.lineTo(pin.x, pin.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    updateWindBadge();
+    const auto = app.querySelector('#zoom-auto');
+    if (auto) auto.setAttribute('aria-pressed', String(!ui.cam));
     if (!baseCanvas || baseCanvas.width !== canvas.width || baseCanvas.height !== canvas.height) {
       baseCanvas = document.createElement('canvas');
       baseCanvas.width = canvas.width;
@@ -785,18 +844,96 @@
     if (ui.loupe) drawLoupe();
   }
 
-  let baseCanvas = null;
+  // Arco del golpe (curva de vuelo vista desde arriba) con la distancia en medio.
+  function arc(a, b, meters, provisional) {
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 2) return;
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    const bend = Math.min(40, L * 0.12);
+    const cx = mx + ((b.y - a.y) / L) * bend;
+    const cy = my - ((b.x - a.x) / L) * bend;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(a.x + 2, a.y + 3);
+    ctx.quadraticCurveTo(cx + 2, cy + 3, b.x + 2, b.y + 3);
+    ctx.stroke();
+    ctx.strokeStyle = provisional ? 'rgba(255,255,255,0.95)' : '#ffffff';
+    ctx.lineWidth = provisional ? 2.5 : 3;
+    if (provisional) ctx.setLineDash([7, 6]);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.quadraticCurveTo(cx, cy, b.x, b.y);
+    ctx.stroke();
+    ctx.restore();
+    if (meters >= 8 && !provisional) tag(`${Math.round(meters)} m`, (mx + cx) / 2, (my + cy) / 2, false);
+  }
 
-  // Lupa ×3 sobre el dedo: muestra exactamente dónde se apuntará el golpe al soltar.
+  function marker(p, label, kind, selected) {
+    ctx.save();
+    if (selected) {
+      ctx.fillStyle = 'rgba(168,214,114,0.45)';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 20, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.shadowColor = 'rgba(0,0,0,0.35)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetY = 2;
+    ctx.fillStyle = kind === 'tee' ? '#f2cf3c' : kind === 'pen' ? '#c8322a' : '#ffffff';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.strokeStyle = '#0f3a24';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = kind === 'pen' ? '#ffffff' : '#0f3a24';
+    ctx.font = FONT(800, 15);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, p.x, p.y + 1);
+    ctx.restore();
+  }
+
+  function tag(text, x, y, strong) {
+    ctx.save();
+    ctx.font = FONT(800, strong ? 17 : 14);
+    const w = ctx.measureText(text).width + (strong ? 20 : 12);
+    const hgt = strong ? 28 : 21;
+    ctx.fillStyle = strong ? 'rgba(15,58,36,0.94)' : 'rgba(15,35,24,0.78)';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x - w / 2, y - hgt / 2, w, hgt, hgt / 2);
+    else ctx.rect(x - w / 2, y - hgt / 2, w, hgt);
+    ctx.fill();
+    ctx.fillStyle = strong ? '#ffffff' : '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y + 1);
+    ctx.restore();
+  }
+
+  // Lupa ×3 sobre el dedo: muestra exactamente dónde quedará la bola.
   function drawLoupe() {
     const dpr = Number(canvas.dataset.dpr) || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.drawImage(baseCanvas, 0, 0, canvas.width / dpr, canvas.height / dpr);
     const p = ui.loupe;
-    const R = 58;
+    const R = 64;
     const Z = 3;
-    const lx = GC.clamp(p.x, R + 6, mapView.w - R - 6);
-    const ly = p.y - 110 < R + 6 ? p.y + 110 : p.y - 110;
+    const lx = GC.clamp(p.x, R + 8, mapView.w - R - 8);
+    const ly = p.y - 120 < insets.top + R ? p.y + 120 : p.y - 120;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(lx, ly, R + 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
     ctx.save();
     ctx.beginPath();
     ctx.arc(lx, ly, R, 0, Math.PI * 2);
@@ -805,113 +942,49 @@
       lx - R, ly - R, 2 * R, 2 * R);
     ctx.restore();
     ctx.save();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(lx, ly, R, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.strokeStyle = '#ffd84a';
+    ctx.strokeStyle = '#0f3a24';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(lx - 14, ly);
-    ctx.lineTo(lx - 4, ly);
-    ctx.moveTo(lx + 4, ly);
-    ctx.lineTo(lx + 14, ly);
-    ctx.moveTo(lx, ly - 14);
-    ctx.lineTo(lx, ly - 4);
-    ctx.moveTo(lx, ly + 4);
-    ctx.lineTo(lx, ly + 14);
+    ctx.moveTo(lx - 18, ly);
+    ctx.lineTo(lx - 5, ly);
+    ctx.moveTo(lx + 5, ly);
+    ctx.lineTo(lx + 18, ly);
+    ctx.moveTo(lx, ly - 18);
+    ctx.lineTo(lx, ly - 5);
+    ctx.moveTo(lx, ly + 5);
+    ctx.lineTo(lx, ly + 18);
     ctx.stroke();
-    // qué hay bajo el punto y a qué distancia
+    ctx.restore();
     const n = currentN();
     const h = holeData(n);
     const w = GC.screenToWorld(cam, mapView, p);
     const pos = positions(n);
     const label = ui.pickTarget
       ? `Objetivo · ${Math.round(GC.dist(pos[pos.length - 1], w))} m`
-      : `${lieName(detectLie(h, w.x, w.y))} · ${Math.round(GC.dist(pos[pos.length - 1], w))} m · a bandera ${Math.round(GC.dist(w, h.pin))}`;
-    pill(label, lx, ly + R + 14);
-    ctx.restore();
+      : `${lieName(detectLie(h, w.x, w.y))} · ${Math.round(GC.dist(pos[pos.length - 1], w))} m · bandera ${Math.round(GC.dist(w, h.pin))}`;
+    tag(label, lx, ly + R + 22, true);
   }
 
-  // Flecha del viento, girada como el mapa (el green queda arriba).
-  function drawWind() {
+  function updateWindBadge() {
+    const el = app.querySelector('#wind');
+    if (!el) return;
     const c = round.cond;
-    if (!c || !c.wind) return;
+    if (!c || !c.wind) {
+      el.hidden = true;
+      return;
+    }
     const b = (((c.from + 180) % 360) * Math.PI) / 180;
     const v = { x: Math.sin(b), y: -Math.cos(b) };
     const sx = v.x * Math.cos(cam.rot) - v.y * Math.sin(cam.rot);
     const sy = v.x * Math.sin(cam.rot) + v.y * Math.cos(cam.rot);
-    ctx.save();
-    ctx.translate(34, 34);
-    ctx.fillStyle = 'rgba(10,25,14,0.72)';
-    ctx.beginPath();
-    ctx.arc(0, 0, 24, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.rotate(Math.atan2(sy, sx));
-    ctx.strokeStyle = '#fff';
-    ctx.fillStyle = '#fff';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(-13, 0);
-    ctx.lineTo(8, 0);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(15, 0);
-    ctx.lineTo(5, -6);
-    ctx.lineTo(5, 6);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-    ctx.save();
-    ctx.fillStyle = '#fff';
-    ctx.font = '700 11px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(`${c.wind} km/h`, 34, 72);
-    ctx.restore();
+    const deg = (Math.atan2(sy, sx) * 180) / Math.PI;
+    el.hidden = false;
+    el.innerHTML = `<svg width="22" height="22" viewBox="-11 -11 22 22" style="transform:rotate(${deg.toFixed(0)}deg);vertical-align:-6px" aria-hidden="true"><path d="M-8 0H6M2-5l6 5-6 5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg> ${c.wind} km/h`;
+    el.setAttribute('aria-label', `Viento ${c.wind} km/h del ${dirName(c.from)}`);
   }
 
-  function dot(x, y, fill, label, selected) {
-    ctx.save();
-    if (selected) {
-      ctx.strokeStyle = '#ffd84a';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(x, y, 15, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.fillStyle = fill;
-    ctx.strokeStyle = '#13201a';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(x, y, 10, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = fill === '#ffffff' || fill === '#f2cf3c' ? '#13201a' : '#ffffff';
-    ctx.font = '700 11px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, x, y + 0.5);
-    ctx.restore();
-  }
-
-  function pill(text, x, y) {
-    ctx.save();
-    ctx.font = '600 11px system-ui, sans-serif';
-    const w = ctx.measureText(text).width + 10;
-    ctx.fillStyle = 'rgba(10,25,14,0.78)';
-    ctx.beginPath();
-    ctx.roundRect ? ctx.roundRect(x - w / 2, y - 9, w, 18, 9) : ctx.rect(x - w / 2, y - 9, w, 18);
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(text, x, y);
-    ctx.restore();
-  }
-
-  // Gestos del mapa: toque = apuntar; mantener = lupa y apuntar al soltar; arrastrar = mover;
-  // dos dedos = zoom; rueda del ratón = zoom.
+  // Gestos: toque = poner la bola provisional; mantener = lupa y colocarla al soltar;
+  // arrastrar la bola provisional = afinarla con lupa; arrastrar el mapa = moverlo; dos dedos = zoom.
   function bindMap() {
     const pts = new Map();
     let g = null;
@@ -925,14 +998,14 @@
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
-        if (g && g.type === 'loupe') drawLoupe();
-        else drawMap();
+        drawMap();
       });
     };
     const two = () => {
       const [a, b] = [...pts.values()];
       return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
     };
+    const nearGhost = (p) => ui.ghost && Math.hypot(...Object.values(subtract(GC.worldToScreen(cam, mapView, ui.ghost), p))) < 34;
     canvas.addEventListener('pointerdown', (e) => {
       canvas.setPointerCapture(e.pointerId);
       const p = local(e);
@@ -945,14 +1018,23 @@
         g = { type: 'pinch', d0: t.d, zoom0: c.zoom, rot: c.rot, w0: GC.screenToWorld(c, mapView, t.mid) };
         redraw();
       } else if (pts.size === 1) {
+        if (nearGhost(p) && !ui.pickTarget) {
+          // afinar la bola provisional: la cámara se congela para que no se mueva bajo el dedo
+          ui.cam = c;
+          g = { type: 'ghost', start: p };
+          ui.loupe = GC.worldToScreen(c, mapView, ui.ghost);
+          redraw();
+          return;
+        }
         g = { type: 'pending', start: p, cam0: c };
         timer = setTimeout(() => {
           if (g && g.type === 'pending') {
             g.type = 'loupe';
+            ui.cam = c;
             ui.loupe = g.start;
-            drawLoupe();
+            redraw();
           }
-        }, 280);
+        }, 300);
       }
     });
     canvas.addEventListener('pointermove', (e) => {
@@ -968,10 +1050,13 @@
         g.type = 'pan';
       }
       if (g.type === 'pan') {
-        const w0 = GC.screenToWorld(g.cam0, mapView, g.start);
-        ui.cam = cameraKeeping(w0, p, g.cam0.zoom, g.cam0.rot);
+        ui.cam = cameraKeeping(GC.screenToWorld(g.cam0, mapView, g.start), p, g.cam0.zoom, g.cam0.rot);
         redraw();
       } else if (g.type === 'loupe') {
+        ui.loupe = p;
+        redraw();
+      } else if (g.type === 'ghost') {
+        ui.ghost = roundPt(GC.screenToWorld(cam, mapView, p));
         ui.loupe = p;
         redraw();
       }
@@ -982,23 +1067,21 @@
       pts.delete(e.pointerId);
       clearTimeout(timer);
       if (!g) return;
-      if (e.type === 'pointerup' && (g.type === 'pending' || g.type === 'loupe')) {
-        ui.loupe = null;
-        g = null;
-        tapMap(p, true);
-        return;
-      }
-      if (g.type === 'loupe') {
-        ui.loupe = null;
-        drawMap();
-      }
-      if (g.type === 'pinch' && pts.size === 1) {
-        // sigue con el dedo que queda como arrastre
+      const type = g.type;
+      if (type === 'pinch' && pts.size === 1) {
         const [rest] = [...pts.values()];
         g = { type: 'pan', start: rest, cam0: fitCamera() };
         return;
       }
-      if (!pts.size) g = null;
+      if (pts.size) return;
+      g = null;
+      ui.loupe = null;
+      if (e.type === 'pointerup' && (type === 'pending' || type === 'loupe')) {
+        tapMap(p, type === 'loupe');
+        return;
+      }
+      if (type === 'ghost') renderHoleUi();
+      drawMap();
     };
     canvas.addEventListener('pointerup', end);
     canvas.addEventListener('pointercancel', end);
@@ -1008,43 +1091,52 @@
     }, { passive: false });
   }
 
-  function tapMap(p) {
+  const subtract = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
+  const roundPt = (w) => ({ x: Math.round(w.x * 10) / 10, y: Math.round(w.y * 10) / 10 });
+
+  function tapMap(p, precise) {
     const n = currentN();
     const hs = holeScore(n);
-    const h = holeData(n);
+    const w = GC.screenToWorld(cam, mapView, p);
     if (ui.pickTarget) {
-      ui.target = GC.screenToWorld(cam, mapView, p);
+      ui.target = w;
       ui.pickTarget = false;
       if (!ui.clubManual) ui.selectedClub = suggestClub(n);
       drawMap();
       renderHoleUi();
       return;
     }
-    // ¿toca un golpe ya apuntado? -> editarlo
-    if (ui.moveIndex == null && !ui.pendingDrop) {
+    // un toque sobre un golpe ya apuntado lo selecciona para editarlo
+    if (!precise && !ui.ghost && ui.moveIndex == null && !ui.pendingDrop) {
       for (let i = hs.entries.length - 1; i >= 0; i--) {
         const e = hs.entries[i];
         if (e.x == null) continue;
         const s = GC.worldToScreen(cam, mapView, e);
-        if (Math.hypot(s.x - p.x, s.y - p.y) < 18) {
+        if (Math.hypot(s.x - p.x, s.y - p.y) < 20) {
           ui.editIndex = ui.editIndex === i ? null : i;
+          ui.more = ui.editIndex != null;
           drawMap();
           renderHoleUi();
           return;
         }
       }
     }
-    const w = GC.screenToWorld(cam, mapView, p);
-    placeAt(w, h, hs);
-  }
-
-  function placeAt(w, h, hs) {
-    const x = Math.round(w.x * 10) / 10;
-    const y = Math.round(w.y * 10) / 10;
     if (hs.done) {
-      toast('Este hoyo está terminado. Toca «Reabrir» para seguir apuntando.');
+      toast('Hoyo terminado. Pulsa «Reabrir» para seguir apuntando.');
       return;
     }
+    ui.ghost = roundPt(w);
+    drawMap();
+    renderHoleUi();
+  }
+
+  // Confirma la bola provisional: golpe nuevo, drop de una penalización o golpe movido.
+  function commitGhost() {
+    const n = currentN();
+    const hs = holeScore(n);
+    const h = holeData(n);
+    if (!ui.ghost) return;
+    const { x, y } = ui.ghost;
     if (ui.moveIndex != null) {
       const e = hs.entries[ui.moveIndex];
       e.x = x;
@@ -1058,19 +1150,19 @@
       ui.pendingDrop = false;
     } else {
       if (!ui.selectedClub) {
-        toast('Elige primero el palo del golpe.');
+        toast('Elige el palo del golpe.');
         return;
       }
-      hs.entries.push({ t: 's', x, y, c: ui.selectedClub, l: detectLie(h, x, y) });
+      const l = detectLie(h, x, y);
+      hs.entries.push({ t: 's', x, y, c: ui.selectedClub, l });
       ui.editIndex = null;
       ui.target = null;
       ui.clubManual = false;
-      const last = hs.entries[hs.entries.length - 1];
-      if (last.l === 'water' || last.l === 'ob') {
-        toast(last.l === 'water' ? 'Bola al agua: añade la penalización si dropas.' : 'Fuera de límites: añade la penalización.');
-      }
+      if (l === 'water' || l === 'ob') toast(l === 'water' ? 'Bola al agua: añade la penalización y marca el drop.' : 'Fuera de límites: añade la penalización.');
+      if (l === 'green') ui.putting = true;
     }
-    ui.selectedClub = suggestClub(currentN());
+    ui.ghost = null;
+    ui.selectedClub = suggestClub(n);
     afterChange();
   }
 
@@ -1092,156 +1184,150 @@
     const hs = holeScore(n);
     const st = holeStats(n);
     const idx = round.cur;
-    const tee = (raw.tees && raw.tees[round.tees]) ? round.tees : 'amarillas';
-    app.querySelector('#hole-id').innerHTML = `
-      <div class="hole-num num">${n}</div>
-      <div class="hole-meta"><b>Par ${raw.par}</b> · ${h.length} m<br>${tee === round.tees ? '' : 'sin rojas · '}${idx + 1}/${round.holes.length}</div>`;
+    const teeOk = raw.tees && raw.tees[round.tees];
     const t = totals();
-    app.querySelector('#total').innerHTML = `<span class="num">${t.played ? signed(t.diff) : 'E'}</span><small>${t.strokes} golpes</small>`;
+    app.querySelector('#hole-id').innerHTML = `
+      <div class="hv-num"><small>Hoyo</small>${n}</div>
+      <div class="hv-meta">Par ${raw.par} · ${h.length} m<span>${teeOk ? (TEES.find((x) => x[0] === round.tees) || [0, ''])[1] : 'Amarillas'} · ${idx + 1} de ${round.holes.length}</span></div>`;
+    app.querySelector('#total').innerHTML = `<b class="${t.diff < 0 ? 'yes' : ''}">${t.played ? signed(t.diff) : 'E'}</b><span>${t.strokes} golpes</span>`;
     app.querySelector('#prev').disabled = idx === 0;
 
-    let hint;
-    if (hs.done) hint = `Hoyo terminado en ${st.strokes}. Toca › para el siguiente.`;
-    else if (ui.pickTarget) hint = 'Toca en el mapa el punto al que quieres jugar.';
-    else if (ui.moveIndex != null) hint = `Toca la nueva posición del golpe ${ui.moveIndex + 1}.`;
-    else if (ui.pendingDrop) hint = 'Toca dónde dropas la bola.';
-    else if (hs.putts > 0) hint = 'Putts apuntados: pulsa «Terminar hoyo» al embocar.';
-    else if (st.lie === 'green') hint = 'En el green: apunta los putts abajo.';
-    else hint = `Toca dónde quedó la bola · golpe ${hs.entries.length + 1}${ui.selectedClub ? ' con ' + clubName(ui.selectedClub) : ''}`;
-    app.querySelector('#hint').textContent = hint;
+    const putting = !hs.done && (ui.putting || st.lie === 'green' || hs.putts > 0);
+    const rec = hs.done || putting ? null : recommend(n);
+    const term = (v, label) => (Math.abs(v) < 0.5 ? '' : ` ${v > 0 ? '+' : '−'}${Math.round(Math.abs(v))} ${label}`);
 
-    const sheet = app.querySelector('#sheet');
-    const status = `<div class="status"><span>Golpe <b class="num">${st.strokes + 1}</b> · desde <b>${lieName(st.lie)}</b></span>
-      <span>A bandera <b class="num">${Math.round(st.toPin)} m</b></span></div>`;
-
-    const chips = hs.entries.map((e, i) => {
-      const pos = positions(n);
-      const d = e.t === 's' ? Math.round(GC.dist(pos[i], pos[i + 1])) : null;
-      const label = e.t === 'p' ? 'Penalización' : `${clubName(e.c)} · ${d} m · ${lieName(e.l)}`;
-      return `<button class="shot-chip${e.t === 'p' ? ' pen' : ''}" data-i="${i}" aria-pressed="${ui.editIndex === i}"><span class="n">${i + 1}</span>${esc(label)}</button>`;
-    }).join('');
-
-    let editor = '';
-    if (ui.editIndex != null && hs.entries[ui.editIndex]) {
-      const e = hs.entries[ui.editIndex];
-      editor = `<div class="editor">
-        ${e.t === 's' ? `<div class="seg" id="e-club">${CLUBS.map((c) => `<button data-k="${c.id}" aria-pressed="${e.c === c.id}">${c.name}</button>`).join('')}</div>
-        <div class="seg" id="e-lie">${LIES.map(([k, l]) => `<button data-k="${k}" aria-pressed="${e.l === k}">${l}</button>`).join('')}</div>` : '<span class="muted">Golpe de penalización.</span>'}
-        <div class="row"><button class="btn small" id="e-move">${e.t === 's' ? 'Mover en el mapa' : 'Marcar el drop'}</button>
-        <button class="btn small danger" id="e-del">Borrar</button><span class="grow"></span><button class="btn small" id="e-close">Listo</button></div>
-      </div>`;
-    }
-
-    const c = round.cond || (round.cond = { temp: bag.tref, wind: 0, from: 270 });
-    const condLine = `<div class="row cond"><span class="muted">${c.temp}° · ${c.wind ? `viento ${c.wind} km/h del ${dirName(c.from)}` : 'sin viento'}</span>
-      <span class="grow"></span>
-      <button class="btn small" id="cond-btn" aria-expanded="${ui.condOpen}">${ui.condOpen ? 'Listo' : 'Condiciones'}</button>
-      ${hs.done ? '' : `<button class="btn small" id="target-btn">${ui.pickTarget ? 'Toca el objetivo…' : ui.target ? 'Objetivo: punto ✕' : 'Objetivo: bandera'}</button>`}</div>
-      ${ui.condOpen ? `<div class="editor">${condControls(c, 'h-')}</div>` : ''}`;
-    const rec = recommend(n);
-    const term = (v, label) => (Math.abs(v) < 0.5 ? '' : ` ${v > 0 ? '+' : '−'} ${Math.round(Math.abs(v))} ${label}`);
     let recHtml = '';
-    if (rec) {
+    if (rec && !ui.ghost) {
       const m = rec.model;
       const parts = [];
-      if (Math.abs(m.drift) >= 0.5) parts.push(`viento cruzado ${Math.round(Math.abs(m.drift))} m`);
+      if (Math.abs(m.drift) >= 0.5) parts.push(`viento ${Math.round(Math.abs(m.drift))} m`);
       if (Math.abs(rec.curve) >= 0.5) parts.push(`tu ${rec.cfg.shape} ${Math.round(Math.abs(rec.curve))} m`);
       recHtml = `<div class="rec">
-        <div class="rec-main"><span class="rec-k">Recomendado</span><b>${rec.club.name}</b>
-          <span class="muted">${rec.partial ? 'golpe corto, a media distancia' : `${rec.cfg.dist} m habitual${rec.alt ? ' · o ' + rec.alt : ''}`}</span>
-          <span class="grow"></span>${ui.selectedClub === rec.club.id ? '' : '<button class="btn small" id="use-rec">Usar</button>'}</div>
-        <div class="rec-calc">Juega <b class="num">${Math.round(m.total)} m</b> = ${Math.round(m.D)} m${term(m.elev, 'de desnivel')}${term(m.wind, m.head > 0 ? 'de viento en contra' : 'de viento a favor')}${term(m.temp, 'por temperatura')}</div>
-        ${Math.abs(rec.aimRight) >= 1 ? `<div class="rec-aim">Apunta ${Math.round(Math.abs(rec.aimRight))} m a la ${rec.aimRight < 0 ? 'izquierda' : 'derecha'} (${parts.join(', ')})</div>` : ''}
-        ${rec.warn ? `<div class="rec-warn">Cuidado: ${rec.warn}.</div>` : ''}
+        <div class="club"><small>Recomendado</small>${rec.club.name}</div>
+        <div class="plays">Juega <b class="num">${Math.round(m.total)} m</b> · ${rec.partial ? 'a media distancia' : `tu ${rec.cfg.dist} m${rec.alt ? ' · o ' + rec.alt : ''}`}</div>
+        <div class="calc">${Math.round(m.D)} m${term(m.elev, 'desnivel')}${term(m.wind, m.head > 0 ? 'viento en contra' : 'viento a favor')}${term(m.temp, 'temperatura')}</div>
+        ${Math.abs(rec.aimRight) >= 1 ? `<div class="aim">Apunta ${Math.round(Math.abs(rec.aimRight))} m a la ${rec.aimRight < 0 ? 'izquierda' : 'derecha'} (${parts.join(', ')})</div>` : '<div class="aim">Apunta a la cruz verde del mapa</div>'}
+        ${rec.warn ? `<div class="warn">Cuidado: ${rec.warn}.</div>` : ''}
+        ${ui.selectedClub === rec.club.id ? '' : '<button class="btn small use" id="use-rec">Usar ' + rec.club.name + '</button>'}
       </div>`;
     }
 
-    sheet.innerHTML = `${status}
-      ${condLine}
-      ${recHtml}
-      ${hs.done ? '' : `<div class="clubs" id="clubs">${CLUBS.filter((x) => bagClub(x.id).on || x.id === ui.selectedClub).map((x) => `<button data-k="${x.id}" aria-pressed="${ui.selectedClub === x.id}">${x.name}</button>`).join('')}</div>`}
-      ${chips ? `<div class="shots" id="shots">${chips}</div>` : ''}
-      ${editor}
-      <div class="row">
-        <span class="stepper-label">Putts</span>
-        <span class="stepper"><button id="p-minus" aria-label="Quitar putt">−</button><span class="val" id="p-val">${hs.putts}</span><button id="p-plus" aria-label="Añadir putt">+</button></span>
-        <span class="grow"></span>
-        ${hs.done ? '' : '<button class="btn small" id="pen">+1 penalización</button>'}
-        <button class="btn small" id="undo" ${hs.entries.length ? '' : 'disabled'}>Deshacer</button>
-      </div>
-      <div class="row">
-        <button class="btn" id="to-card">Tarjeta</button>
-        <span class="grow"></span>
-        ${hs.done ? '<button class="btn" id="reopen">Reabrir hoyo</button>' : `<button class="btn primary" id="finish" ${st.strokes ? '' : 'disabled'}>Terminar hoyo · ${st.strokes}</button>`}
-      </div>`;
+    const clubsHtml = hs.done || putting || ui.pendingDrop || ui.moveIndex != null ? '' : `<div class="clubs" id="clubs" role="group" aria-label="Palo del golpe">${CLUBS
+      .filter((x) => bagClub(x.id).on || x.id === ui.selectedClub)
+      .map((x) => `<button data-k="${x.id}" aria-pressed="${ui.selectedClub === x.id}" class="${rec && rec.club.id === x.id ? 'rec-mark' : ''}"><b>${short(x)}</b><span>${bagClub(x.id).dist} m</span></button>`).join('')}</div>`;
 
-    sheet.querySelectorAll('#clubs button').forEach((b) => (b.onclick = () => { ui.selectedClub = b.dataset.k; ui.clubManual = true; renderHoleUi(); }));
-    sheet.querySelector('#cond-btn').onclick = () => { ui.condOpen = !ui.condOpen; renderHoleUi(); };
-    bindCond(sheet, c, 'h-', () => {
-      if (!ui.clubManual) ui.selectedClub = suggestClub(n);
-      Store.save(round);
-      drawMap();
-      renderHoleUi();
-    });
-    const tb = sheet.querySelector('#target-btn');
-    if (tb) tb.onclick = () => {
-      if (ui.target || ui.pickTarget) {
-        ui.target = null;
-        ui.pickTarget = false;
-        if (!ui.clubManual) ui.selectedClub = suggestClub(n);
-        drawMap();
-      } else {
-        ui.pickTarget = true;
+    // zona de acción según el estado
+    let action;
+    const pos = positions(n);
+    if (hs.done) {
+      action = `<div class="action"><button class="btn" id="reopen">Reabrir</button>
+        <button class="btn primary" id="next2"><span>${idx < round.holes.length - 1 ? 'Siguiente hoyo' : 'Ver tarjeta'}<small>${GC.scoreName(st.strokes, st.par)} · ${st.strokes} golpes</small></span></button></div>`;
+    } else if (ui.ghost) {
+      const from = ui.moveIndex != null ? pos[ui.moveIndex] : pos[pos.length - 1];
+      const d = Math.round(GC.dist(from, ui.ghost));
+      const what = ui.moveIndex != null ? `Mover golpe ${ui.moveIndex + 1}` : ui.pendingDrop ? 'Confirmar drop' : `Apuntar golpe ${hs.entries.length + 1}`;
+      const sub = ui.pendingDrop ? lieName(detectLie(h, ui.ghost.x, ui.ghost.y)) : `${ui.moveIndex != null ? '' : clubName(ui.selectedClub) + ' · '}${d} m · ${lieName(detectLie(h, ui.ghost.x, ui.ghost.y))}`;
+      action = `<div class="action"><button class="btn cancel" id="cancel" aria-label="Quitar la bola provisional">✕</button>
+        <button class="btn primary" id="commit"><span>${what}<small>${sub}</small></span></button></div>`;
+    } else if (putting) {
+      action = `<div class="putt-row"><span class="lbl">Putts</span>
+        <span class="stepper"><button id="p-minus" aria-label="Quitar putt">−</button><span class="val">${hs.putts}</span><button id="p-plus" aria-label="Añadir putt">+</button></span>
+        <span class="grow"></span></div>
+        <div class="action"><button class="btn primary" id="finish" ${st.strokes ? '' : 'disabled'}><span>Embocada · terminar<small>${st.strokes} golpes en el hoyo</small></span></button></div>`;
+    } else {
+      const msg = ui.pickTarget ? 'Toca el punto al que quieres jugar'
+        : ui.pendingDrop ? 'Toca dónde dropas la bola'
+        : ui.moveIndex != null ? `Toca la nueva posición del golpe ${ui.moveIndex + 1}`
+        : 'Toca el mapa donde quedó la bola';
+      action = `<div class="action"><div class="hintbox"><span class="tap" aria-hidden="true"></span><span>${msg}<br><span class="muted" style="font-size:13px">Mantén pulsado para afinar con lupa</span></span></div></div>`;
+    }
+
+    const tools = hs.done ? '' : `<div class="tools">
+      ${putting ? '<button class="btn small" id="back-shots">Otro golpe</button>' : '<button class="btn small" id="to-putts">Putts / green</button>'}
+      <button class="btn small" id="pen">+1 penalización</button>
+      <button class="btn small" id="undo" ${hs.entries.length || hs.putts ? '' : 'disabled'}>Deshacer</button>
+      ${putting ? '' : `<button class="btn small" id="finish2" ${st.strokes ? '' : 'disabled'}>Terminar hoyo</button>`}
+      <button class="btn small ghost" id="more" aria-expanded="${ui.more}">${ui.more ? 'Menos ▴' : 'Más ▾'}</button></div>`;
+
+    // detalles: condiciones, objetivo y lista de golpes
+    let details = '';
+    if (ui.more || hs.done) {
+      const c = round.cond || (round.cond = { temp: bag.tref, wind: 0, from: 270 });
+      const list = hs.entries.map((e, i) => {
+        const d = e.t === 's' ? Math.round(GC.dist(pos[i], pos[i + 1])) : null;
+        return `<button class="shot-chip${e.t === 'p' ? ' pen' : ''}" data-i="${i}" aria-pressed="${ui.editIndex === i}"><span class="n">${i + 1}</span>
+          ${e.t === 'p' ? '<b>Penalización</b>' : `<b>${esc(clubName(e.c))}</b><span class="muted">${lieName(e.l)}</span><span class="d">${d} m</span>`}</button>`;
+      }).join('');
+      let editor = '';
+      if (ui.editIndex != null && hs.entries[ui.editIndex]) {
+        const e = hs.entries[ui.editIndex];
+        editor = `<div class="editor">
+          ${e.t === 's' ? `<div class="seg" id="e-club">${CLUBS.map((x) => `<button data-k="${x.id}" aria-pressed="${e.c === x.id}">${x.name}</button>`).join('')}</div>
+          <div class="seg" id="e-lie">${LIES.map(([k, l]) => `<button data-k="${k}" aria-pressed="${e.l === k}">${l}</button>`).join('')}</div>` : '<span class="muted">Golpe de penalización.</span>'}
+          <div class="row"><button class="btn small" id="e-move">${e.t === 's' ? 'Mover en el mapa' : 'Marcar el drop'}</button>
+          <button class="btn small danger" id="e-del">Borrar</button><span class="grow"></span><button class="btn small" id="e-close">Listo</button></div></div>`;
       }
-      renderHoleUi();
-    };
-    const ur = sheet.querySelector('#use-rec');
-    if (ur) ur.onclick = () => { ui.selectedClub = rec.club.id; ui.clubManual = false; renderHoleUi(); };
-    const sel = sheet.querySelector('#clubs button[aria-pressed="true"]');
-    if (sel) sel.scrollIntoView({ block: 'nearest', inline: 'center' });
-    sheet.querySelectorAll('#shots .shot-chip').forEach((b) => (b.onclick = () => {
-      const i = Number(b.dataset.i);
-      ui.editIndex = ui.editIndex === i ? null : i;
-      drawMap();
+      details = `<div class="details">
+        <div class="row"><span class="eyebrow">Condiciones</span><span class="grow"></span>
+          ${hs.done ? '' : `<button class="btn small" id="target-btn">${ui.pickTarget ? 'Toca el objetivo…' : ui.target ? 'Objetivo: punto ✕' : 'Objetivo: bandera'}</button>`}</div>
+        <div class="cond-grid">${condControls(c, 'h-')}</div>
+        ${list ? `<span class="eyebrow">Golpes del hoyo</span><div class="shots" id="shots">${list}</div>` : ''}
+        ${editor}
+      </div>`;
+    }
+
+    const sheet = app.querySelector('#sheet');
+    sheet.innerHTML = `<button class="grab" id="grab" aria-label="${ui.more ? 'Plegar' : 'Desplegar'} el panel"></button>
+      <div class="sh-head">
+        <div><span class="eyebrow">${hs.done ? 'Hoyo terminado' : putting ? 'En el green' : 'Golpe'}</span>
+          <div class="big num">${hs.done ? st.strokes : st.strokes + 1}</div>
+          <span class="from">${hs.done ? `${st.putts} putts` : `desde <b>${lieName(st.lie)}</b>`}</span></div>
+        <div class="right"><span class="eyebrow">A bandera</span><div class="big num">${Math.round(st.toPin)}<small>m</small></div>
+          <span class="from">${rec || hs.done || !h.elev ? '' : `juega ${Math.round(GC.playsLike(h, pos[pos.length - 1], h.pin))} m por desnivel`}</span></div>
+      </div>
+      ${recHtml}
+      ${clubsHtml}
+      ${action}
+      ${tools}
+      ${details}`;
+
+    // eventos
+    const $s = (q) => sheet.querySelector(q);
+    sheet.querySelectorAll('#clubs button').forEach((b) => (b.onclick = () => {
+      ui.selectedClub = b.dataset.k;
+      ui.clubManual = true;
       renderHoleUi();
     }));
-    if (editor) {
-      const e = hs.entries[ui.editIndex];
-      sheet.querySelectorAll('#e-club button').forEach((b) => (b.onclick = () => { e.c = b.dataset.k; afterChange(); }));
-      sheet.querySelectorAll('#e-lie button').forEach((b) => (b.onclick = () => { e.l = b.dataset.k; afterChange(); }));
-      sheet.querySelector('#e-move').onclick = () => {
-        if (hs.done) hs.done = false;
-        ui.moveIndex = ui.editIndex;
-        renderHoleUi();
-      };
-      sheet.querySelector('#e-del').onclick = () => {
-        hs.entries.splice(ui.editIndex, 1);
-        ui.editIndex = null;
-        afterChange();
-      };
-      sheet.querySelector('#e-close').onclick = () => { ui.editIndex = null; drawMap(); renderHoleUi(); };
-    }
-    sheet.querySelector('#p-minus').onclick = () => { hs.putts = Math.max(0, hs.putts - 1); afterChange(); };
-    sheet.querySelector('#p-plus').onclick = () => { hs.putts += 1; afterChange(); };
-    const pen = sheet.querySelector('#pen');
-    if (pen) pen.onclick = () => {
+    const sel = $s('#clubs button[aria-pressed="true"]');
+    if (sel) sel.scrollIntoView({ block: 'nearest', inline: 'center' });
+    const toggleMore = () => { ui.more = !ui.more; renderHoleUi(); };
+    $s('#grab').onclick = toggleMore;
+    if ($s('#more')) $s('#more').onclick = toggleMore;
+    if ($s('#use-rec')) $s('#use-rec').onclick = () => { ui.selectedClub = rec.club.id; ui.clubManual = false; renderHoleUi(); };
+    if ($s('#cancel')) $s('#cancel').onclick = () => { ui.ghost = null; afterChange(); };
+    if ($s('#commit')) $s('#commit').onclick = commitGhost;
+    if ($s('#p-minus')) $s('#p-minus').onclick = () => { hs.putts = Math.max(0, hs.putts - 1); afterChange(); };
+    if ($s('#p-plus')) $s('#p-plus').onclick = () => { hs.putts += 1; afterChange(); };
+    if ($s('#to-putts')) $s('#to-putts').onclick = () => { ui.putting = true; ui.ghost = null; afterChange(); };
+    if ($s('#back-shots')) $s('#back-shots').onclick = () => { ui.putting = false; hs.putts = 0; afterChange(); };
+    if ($s('#pen')) $s('#pen').onclick = () => {
       hs.entries.push({ t: 'p' });
       ui.pendingDrop = true;
+      ui.putting = false;
+      ui.ghost = null;
       afterChange();
     };
-    sheet.querySelector('#undo').onclick = () => {
-      hs.entries.pop();
-      ui.editIndex = null;
-      ui.pendingDrop = false;
-      ui.moveIndex = null;
+    if ($s('#undo')) $s('#undo').onclick = () => {
+      if (hs.putts > 0 && putting) hs.putts -= 1;
+      else hs.entries.pop();
+      Object.assign(ui, { editIndex: null, pendingDrop: false, moveIndex: null, ghost: null });
+      ui.putting = hs.putts > 0;
+      ui.selectedClub = suggestClub(n);
       afterChange();
     };
-    sheet.querySelector('#to-card').onclick = renderCard;
-    const fin = sheet.querySelector('#finish');
-    if (fin) fin.onclick = () => {
+    const finish = () => {
       hs.done = true;
-      ui.pendingDrop = false;
-      const nextIdx = round.holes.findIndex((m, i) => i > round.cur && !(round.scores[m] && round.scores[m].done));
+      Object.assign(ui, { pendingDrop: false, ghost: null, putting: false });
       if (round.holes.every((m) => round.scores[m] && round.scores[m].done)) {
         round.finished = true;
         Store.save(round);
@@ -1250,15 +1336,69 @@
       }
       Store.save(round);
       toast(`${GC.scoreName(st.strokes, st.par)} en el ${n}`);
+      const nextIdx = round.holes.findIndex((m, i) => i > round.cur && !(round.scores[m] && round.scores[m].done));
       openHole(nextIdx >= 0 ? nextIdx : Math.min(round.cur + 1, round.holes.length - 1));
     };
-    const reopen = sheet.querySelector('#reopen');
-    if (reopen) reopen.onclick = () => {
+    if ($s('#finish')) $s('#finish').onclick = finish;
+    if ($s('#finish2')) $s('#finish2').onclick = finish;
+    if ($s('#reopen')) $s('#reopen').onclick = () => {
       hs.done = false;
       round.finished = false;
       ui.selectedClub = suggestClub(n);
       afterChange();
     };
+    if ($s('#next2')) $s('#next2').onclick = () => (idx < round.holes.length - 1 ? openHole(idx + 1) : renderCard());
+    const tb = $s('#target-btn');
+    if (tb) tb.onclick = () => {
+      if (ui.target || ui.pickTarget) {
+        ui.target = null;
+        ui.pickTarget = false;
+        if (!ui.clubManual) ui.selectedClub = suggestClub(n);
+        drawMap();
+      } else {
+        ui.pickTarget = true;
+        ui.ghost = null;
+      }
+      renderHoleUi();
+    };
+    if (ui.more || hs.done) {
+      const c = round.cond;
+      bindCond(sheet, c, 'h-', () => {
+        if (!ui.clubManual) ui.selectedClub = suggestClub(n);
+        Store.save(round);
+        drawMap();
+        renderHoleUi();
+      });
+      sheet.querySelectorAll('#shots .shot-chip').forEach((b) => (b.onclick = () => {
+        const i = Number(b.dataset.i);
+        ui.editIndex = ui.editIndex === i ? null : i;
+        drawMap();
+        renderHoleUi();
+      }));
+      if (ui.editIndex != null && hs.entries[ui.editIndex]) {
+        const e = hs.entries[ui.editIndex];
+        sheet.querySelectorAll('#e-club button').forEach((b) => (b.onclick = () => { e.c = b.dataset.k; afterChange(); }));
+        sheet.querySelectorAll('#e-lie button').forEach((b) => (b.onclick = () => { e.l = b.dataset.k; afterChange(); }));
+        $s('#e-move').onclick = () => {
+          if (hs.done) hs.done = false;
+          ui.moveIndex = ui.editIndex;
+          ui.ghost = e.x != null ? { x: e.x, y: e.y } : null;
+          ui.more = false;
+          afterChange();
+        };
+        $s('#e-del').onclick = () => {
+          hs.entries.splice(ui.editIndex, 1);
+          ui.editIndex = null;
+          afterChange();
+        };
+        $s('#e-close').onclick = () => { ui.editIndex = null; drawMap(); renderHoleUi(); };
+      }
+    }
+  }
+
+  // Nombre corto del palo para los botones (DR, M3, H7, PW…).
+  function short(c) {
+    return { dr: 'Driver', m3: 'Mad. 3', m5: 'Mad. 5', hi: 'Híbrido' }[c.id] || c.id.toUpperCase();
   }
 
   // GPS: solo funciona donde el navegador lo permite (no dentro de la página publicada en claude.ai).
@@ -1277,7 +1417,9 @@
           return;
         }
         toast(`Posición con precisión de ±${Math.round(p.coords.accuracy)} m`);
-        placeAt(w, h, holeScore(n));
+        ui.ghost = roundPt(w);
+        drawMap();
+        renderHoleUi();
       },
       () => toast('La ubicación no está disponible aquí: toca en el mapa.'),
       { enableHighAccuracy: true, timeout: 12000, maximumAge: 5000 }
@@ -1317,7 +1459,8 @@
     const avg = clubAverages(rounds);
     const count = CLUBS.filter((c) => bagClub(c.id).on).length + 1;
     app.innerHTML = `
-      <div class="card-head"><div><h2>Mi bolsa</h2><div class="muted" id="bag-count">${count}/14 palos contando el putter</div></div></div>
+      <div class="page-head"><div><span class="eyebrow">Tus palos y tus distancias</span><h1 class="h-display">Mi bolsa</h1>
+        <div class="sub" id="bag-count">${count}/14 palos contando el putter</div></div></div>
       <div class="row" style="margin:14px 0"><button class="btn" id="home">‹ Vueltas</button></div>
       <div class="panel stack">
         <div class="field"><label>Temperatura a la que das esas distancias</label>
@@ -1453,9 +1596,10 @@
     const pct = (a, b) => (b ? Math.round((100 * a) / b) + ' %' : '–');
 
     app.innerHTML = `
-      <div class="card-head">
-        <div><h2>Tarjeta</h2><div class="muted">${esc(fmtDate(round.date))} · ${tee ? tee[1] : round.tees} · ${round.finished ? 'terminada' : 'en curso'}</div></div>
-        <div class="big-score num">${t.played ? t.strokes : '–'}<small>${t.played ? signed(t.diff) : ''}</small></div>
+      <div class="page-head">
+        <div><span class="eyebrow">Tarjeta · Golf Sotoverde</span><h1 class="h-display">${esc(fmtDate(round.date))}</h1>
+          <div class="sub">Barras ${tee ? tee[1].toLowerCase() : round.tees} · ${round.finished ? 'vuelta terminada' : 'vuelta en curso'}</div></div>
+        <div class="big-score num${t.diff < 0 ? ' under' : ''}">${t.played ? t.strokes : '–'}<small>${t.played ? signed(t.diff) : ''}</small></div>
       </div>
       <div class="row" style="margin:14px 0">
         <button class="btn" id="home">‹ Vueltas</button>

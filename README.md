@@ -4,9 +4,11 @@
 cada hoyo dónde quedó la bola (palo, distancia y lie automáticos), con penalizaciones, putts, tarjeta y
 estadísticas (calles, greens en regulación, distancia media por palo).
 
-Mapa: pellizca con dos dedos o usa + / − para acercar, arrastra para moverte, «Todo» enseña el hoyo entero y
-«Auto» vuelve al encuadre bola-green. Mantén el dedo pulsado para sacar una lupa ×3 con el lie y la distancia
-bajo el dedo: al soltar se apunta el golpe exactamente en la cruz.
+Vista del hoyo a pantalla completa. Para apuntar un golpe: toca el mapa donde quedó la bola y aparece una
+bola provisional con el lie y la distancia; arrástrala (con lupa ×3) para afinarla y pulsa «Apuntar golpe».
+Mantener pulsado también abre la lupa. Pellizca o usa + / − para el zoom, arrastra el mapa para moverte,
+«Todo» enseña el hoyo entero y «Auto» vuelve al encuadre bola-green. En el green, «Putts / green» cambia el
+panel a putts y «Embocada · terminar».
 
 **Mi bolsa**: cada palo con su distancia habitual, vuelo (recto, draw, fade, gancho, slice), altura de bola y
 fallo más repetido. En cada golpe recomienda palo y punto de mira según la distancia que juega el golpe:
