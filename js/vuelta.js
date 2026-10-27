@@ -29,6 +29,104 @@
   ];
   const clubName = (id) => (CLUBS.find((c) => c.id === id) || { name: '—' }).name;
 
+  // ---------- mi bolsa ----------
+  const SHAPES = [['recto', 'Recto'], ['draw', 'Draw'], ['fade', 'Fade'], ['gancho', 'Gancho'], ['slice', 'Slice']];
+  const HEIGHTS = [['baja', 'Baja'], ['media', 'Media'], ['alta', 'Alta']];
+  const MISSES = [['ninguno', 'Ninguno'], ['izquierda', 'Izquierda'], ['derecha', 'Derecha'], ['corto', 'Corto'], ['largo', 'Largo']];
+  const DEFAULT_ON = ['dr', 'm3', 'hi', 'h5', 'h6', 'h7', 'h8', 'h9', 'pw', 'gw', 'sw'];
+  const WIND_DIRS = [['N', 0], ['NE', 45], ['E', 90], ['SE', 135], ['S', 180], ['SO', 225], ['O', 270], ['NO', 315]];
+  const dirName = (deg) => (WIND_DIRS.find((d) => d[1] === ((Math.round(deg / 45) * 45) % 360)) || ['N'])[0];
+
+  function defaultBag() {
+    return {
+      v: 1,
+      tref: 20,
+      clubs: Object.fromEntries(CLUBS.map((c) => [c.id, {
+        on: DEFAULT_ON.includes(c.id), dist: c.typical, shape: 'recto', height: 'media', miss: 'ninguno',
+      }])),
+    };
+  }
+  let bag = defaultBag();
+  const bagClub = (id) => bag.clubs[id] || defaultBag().clubs[id];
+
+  /*
+   * Distancia que "juega" un golpe, en metros. Reglas de campo habituales:
+   * - desnivel: 1 m de subida = 1 m más;
+   * - viento: +0,62 % por km/h de cara y −0,31 % por km/h a favor (bola alta ×1,3, baja ×0,7);
+   * - temperatura: −0,2 % por grado por encima de la de referencia de la bolsa.
+   * El viento cruzado desplaza la bola ≈ 0,0027 m por km/h y metro de golpe.
+   */
+  function shotModel(h, from, to, cond, height) {
+    const D = GC.dist(from, to);
+    const elev = h.heightAt(to.x, to.y) - h.heightAt(from.x, from.y);
+    const hm = { baja: 0.7, media: 1, alta: 1.3 }[height] || 1;
+    const w = windComponents(from, to, cond);
+    const windPct = w.head > 0 ? w.head * 0.0062 * hm : w.head * 0.0031 * hm;
+    const tempPct = -0.002 * ((cond.temp == null ? bag.tref : cond.temp) - bag.tref);
+    const base = D + elev;
+    return {
+      D, elev, wind: base * windPct, temp: base * tempPct, total: base * (1 + windPct + tempPct),
+      head: w.head, right: w.right, drift: w.right * D * 0.0027 * hm,
+    };
+  }
+
+  // Viento en componentes respecto al golpe: head > 0 = de cara; right > 0 = empuja a la derecha.
+  function windComponents(from, to, cond) {
+    const W = cond.wind || 0;
+    if (!W) return { head: 0, right: 0 };
+    const toBearing = (((cond.from || 0) + 180) * Math.PI) / 180;
+    const v = { x: Math.sin(toBearing) * W, y: -Math.cos(toBearing) * W }; // x este, y sur
+    const L = GC.dist(from, to) || 1;
+    const u = { x: (to.x - from.x) / L, y: (to.y - from.y) / L };
+    const r = { x: -u.y, y: u.x };
+    return { head: -(v.x * u.x + v.y * u.y), right: v.x * r.x + v.y * r.y };
+  }
+
+  const SHAPE_CURVE = { recto: 0, draw: -0.03, fade: 0.03, gancho: -0.07, slice: 0.07 }; // fracción del golpe hacia la derecha
+
+  function recommend(n) {
+    const st = holeStats(n);
+    if (st.lie === 'green' || holeScore(n).done) return null;
+    const h = holeData(n);
+    const pos = positions(n);
+    const from = pos[pos.length - 1];
+    const to = ui.target || h.pin;
+    const cond = round.cond || { temp: bag.tref, wind: 0, from: 0 };
+    const clubs = CLUBS.filter((c) => bagClub(c.id).on).sort((a, b) => bagClub(a.id).dist - bagClub(b.id).dist);
+    if (!clubs.length) return null;
+    const pick = (P) => clubs.find((c) => bagClub(c.id).dist >= P - 3) || clubs[clubs.length - 1];
+    let m = shotModel(h, from, to, cond, 'media');
+    let club = pick(m.total);
+    m = shotModel(h, from, to, cond, bagClub(club.id).height);
+    club = pick(m.total);
+    const cfg = bagClub(club.id);
+    const i = clubs.indexOf(club);
+    const shorter = clubs[i - 1];
+    // alternativa: el palo corto si queda a 5 m o menos de lo que juega el golpe
+    let alt = null;
+    if (shorter && m.total - bagClub(shorter.id).dist <= 5) alt = `${shorter.name} a fondo (${bagClub(shorter.id).dist} m)`;
+    else if (cfg.dist - m.total > 10 && i > 0) alt = `${club.name} suave`;
+    const partial = i === 0 && m.total < cfg.dist * 0.8;
+    // punto de mira: corrige viento cruzado y curva habitual
+    const curve = (SHAPE_CURVE[cfg.shape] || 0) * m.D;
+    const aimRight = -(m.drift + curve);
+    const L = m.D || 1;
+    const u = { x: (to.x - from.x) / L, y: (to.y - from.y) / L };
+    const r = { x: -u.y, y: u.x };
+    const aim = { x: to.x + r.x * aimRight, y: to.y + r.y * aimRight };
+    // ¿el fallo habitual acaba en un obstáculo?
+    let warn = null;
+    const off = { izquierda: [-12, 0], derecha: [12, 0], corto: [0, -15], largo: [0, 15] }[cfg.miss];
+    if (off) {
+      const pt = { x: to.x + r.x * off[0] + u.x * off[1], y: to.y + r.y * off[0] + u.y * off[1] };
+      const s = h.surfaceAt(pt.x, pt.y);
+      if (s === 'water' || s === 'ob' || s === 'sand') {
+        warn = `tu fallo habitual (${cfg.miss}) acaba en ${s === 'water' ? 'agua' : s === 'ob' ? 'fuera de límites' : 'búnker'}`;
+      }
+    }
+    return { club, cfg, model: m, alt, partial, aimRight, aim, curve, warn, from, to };
+  }
+
   const LIES = [
     ['fairway', 'Calle'], ['rough', 'Rough'], ['sand', 'Búnker'], ['green', 'Green'],
     ['water', 'Agua'], ['ob', 'Fuera'], ['tee', 'Tee'],
@@ -138,6 +236,46 @@
         }
       }
     },
+    async loadBag() {
+      try {
+        if (this.mode === 'db') {
+          const d = await this.col().doc('bolsa').get();
+          return d.exists ? JSON.parse(JSON.stringify(d.data())) : null;
+        }
+        return JSON.parse(localStorage.getItem(LOCAL_KEY + '-bolsa'));
+      } catch (e) {
+        return null;
+      }
+    },
+    saveBag(b) {
+      clearTimeout(this.timers.bolsa);
+      this.timers.bolsa = setTimeout(async () => {
+        if (this.mode !== 'db') {
+          try {
+            localStorage.setItem(LOCAL_KEY + '-bolsa', JSON.stringify(b));
+          } catch (e) {
+            toast('No se pudo guardar la bolsa en este navegador.');
+          }
+          return;
+        }
+        if (this.readOnly || this.writing.bolsa) {
+          this.dirty.bolsa = true;
+          return;
+        }
+        this.writing.bolsa = true;
+        try {
+          await this.col().doc('bolsa').set(JSON.parse(JSON.stringify(b)));
+        } catch (e) {
+          toast('No se pudo guardar la bolsa.');
+        } finally {
+          this.writing.bolsa = false;
+          if (this.dirty.bolsa) {
+            this.dirty.bolsa = false;
+            this.saveBag(b);
+          }
+        }
+      }, 600);
+    },
     async remove(id) {
       if (this.mode === 'db') {
         try {
@@ -158,7 +296,7 @@
 
   // Solo documentos con forma de vuelta (la colección podría tener otros).
   function isRound(r) {
-    return r && typeof r.id === 'string' && typeof r.date === 'string' && Array.isArray(r.holes) && r.scores && typeof r.scores === 'object';
+    return r && r.id !== 'bolsa' && typeof r.id === 'string' && typeof r.date === 'string' && Array.isArray(r.holes) && r.scores && typeof r.scores === 'object';
   }
 
   // ---------- modelo ----------
@@ -166,7 +304,10 @@
   let rounds = [];
   let round = null;
   let view = 'home';
-  const ui = { selectedClub: null, editIndex: null, moveIndex: null, pendingDrop: false, showAll: false };
+  const ui = {
+    selectedClub: null, clubManual: false, editIndex: null, moveIndex: null, pendingDrop: false, showAll: false,
+    target: null, pickTarget: false, condOpen: false,
+  };
 
   const prepared = {};
   function holeData(n) {
@@ -268,18 +409,8 @@
   }
 
   function suggestClub(n) {
-    const st = holeStats(n);
-    const raw = byNumber[n];
-    if (st.lie === 'green') return null;
-    if (!holeScore(n).entries.length && raw.par >= 4) return 'dr';
-    const avg = clubAverages(rounds.concat(round && !rounds.includes(round) ? [round] : []));
-    const typical = (c) => {
-      const d = avg[c.id];
-      return d && d.length >= 2 ? d.reduce((a, b) => a + b, 0) / d.length : c.typical;
-    };
-    const need = st.toPin;
-    const fits = CLUBS.filter((c) => c.id !== 'dr' && typical(c) >= need * 0.95);
-    return fits.length ? fits[fits.length - 1].id : 'm3';
+    const rec = recommend(n);
+    return rec ? rec.club.id : null;
   }
 
   function newRound(tees, routeKey) {
@@ -297,6 +428,7 @@
       cur: 0,
       finished: false,
       scores: {},
+      cond: { temp: form.temp, wind: form.wind, from: form.from },
       createdAt: now,
       updatedAt: now,
     };
@@ -304,7 +436,32 @@
 
   // ---------- inicio ----------
 
-  const form = { tees: 'amarillas', route: '18' };
+  const form = { tees: 'amarillas', route: '18', temp: 20, wind: 0, from: 270 };
+
+  // Controles de condiciones (temperatura y viento), reutilizados al empezar y durante la vuelta.
+  function condControls(c, prefix) {
+    return `<div class="field"><label>Temperatura</label>
+        <span class="stepper"><button data-c="${prefix}temp-" aria-label="Menos grados">−</button><span class="val">${c.temp}°</span><button data-c="${prefix}temp+" aria-label="Más grados">+</button></span></div>
+      <div class="field"><label>Viento</label>
+        <span class="stepper"><button data-c="${prefix}wind-" aria-label="Menos viento">−</button><span class="val">${c.wind}</span><button data-c="${prefix}wind+" aria-label="Más viento">+</button></span>
+        <span class="stepper-label">km/h</span></div>
+      <div class="field"><label>Viento del… (de dónde sopla)</label>
+        <div class="seg">${WIND_DIRS.map(([k, d]) => `<button data-c="${prefix}from" data-d="${d}" aria-pressed="${c.from === d}">${k}</button>`).join('')}</div></div>`;
+  }
+
+  function bindCond(root, c, prefix, onChange) {
+    root.querySelectorAll(`[data-c^="${prefix}"]`).forEach((b) => {
+      b.onclick = () => {
+        const k = b.dataset.c.slice(prefix.length);
+        if (k === 'temp-') c.temp = Math.max(-10, c.temp - 1);
+        if (k === 'temp+') c.temp = Math.min(45, c.temp + 1);
+        if (k === 'wind-') c.wind = Math.max(0, c.wind - 2);
+        if (k === 'wind+') c.wind = Math.min(80, c.wind + 2);
+        if (k === 'from') c.from = Number(b.dataset.d);
+        onChange();
+      };
+    });
+  }
 
   function renderHome() {
     view = 'home';
@@ -329,7 +486,14 @@
           <div class="seg" id="f-route">${ROUTES.map(([k, l]) =>
             `<button type="button" data-k="${k}" aria-pressed="${form.route === k}">${l}</button>`).join('')}</div>
         </div>
+        ${condControls(form, 'f-')}
         <div><button class="btn primary" id="start" ${listLoaded ? '' : 'disabled'}>Empezar vuelta</button></div>
+      </div>
+
+      <h2 class="section-title">Mi bolsa</h2>
+      <div class="panel stack">
+        <p class="bag-summary">${CLUBS.filter((c) => bagClub(c.id).on).map((c) => `<span><b>${c.name}</b> <span class="num">${bagClub(c.id).dist}</span></span>`).join('') || '<span class="muted">Sin palos.</span>'}</p>
+        <div><button class="btn" id="bag">Editar mi bolsa</button></div>
       </div>
 
       <h2 class="section-title">Vueltas</h2>
@@ -339,6 +503,8 @@
         <span>Mapas: ortofoto y MDT © IGN · contorno © OpenStreetMap</span></p>`;
     app.querySelectorAll('#f-tees button').forEach((b) => (b.onclick = () => { form.tees = b.dataset.k; renderHome(); }));
     app.querySelectorAll('#f-route button').forEach((b) => (b.onclick = () => { form.route = b.dataset.k; renderHome(); }));
+    bindCond(app, form, 'f-', renderHome);
+    app.querySelector('#bag').onclick = renderBag;
     app.querySelector('#start').onclick = () => {
       round = newRound(form.tees, form.route);
       rounds.unshift(round);
@@ -543,7 +709,74 @@
       ctx.stroke();
       ctx.restore();
     }
+    const rec = recommend(n);
+    if (rec) {
+      const a = w2s(rec.aim);
+      const f = w2s(rec.from);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(120,200,255,0.95)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 5]);
+      ctx.beginPath();
+      ctx.moveTo(f.x, f.y);
+      ctx.lineTo(a.x, a.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, 9, 0, Math.PI * 2);
+      ctx.moveTo(a.x - 14, a.y);
+      ctx.lineTo(a.x + 14, a.y);
+      ctx.moveTo(a.x, a.y - 14);
+      ctx.lineTo(a.x, a.y + 14);
+      ctx.stroke();
+      if (ui.target) {
+        const t = w2s(ui.target);
+        ctx.fillStyle = 'rgba(120,200,255,0.35)';
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    drawWind();
     app.querySelector('#zoom').textContent = ui.showAll ? 'Cerca' : 'Todo';
+  }
+
+  // Flecha del viento, girada como el mapa (el green queda arriba).
+  function drawWind() {
+    const c = round.cond;
+    if (!c || !c.wind) return;
+    const b = (((c.from + 180) % 360) * Math.PI) / 180;
+    const v = { x: Math.sin(b), y: -Math.cos(b) };
+    const sx = v.x * Math.cos(cam.rot) - v.y * Math.sin(cam.rot);
+    const sy = v.x * Math.sin(cam.rot) + v.y * Math.cos(cam.rot);
+    ctx.save();
+    ctx.translate(34, 34);
+    ctx.fillStyle = 'rgba(10,25,14,0.72)';
+    ctx.beginPath();
+    ctx.arc(0, 0, 24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.rotate(Math.atan2(sy, sx));
+    ctx.strokeStyle = '#fff';
+    ctx.fillStyle = '#fff';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-13, 0);
+    ctx.lineTo(8, 0);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(15, 0);
+    ctx.lineTo(5, -6);
+    ctx.lineTo(5, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.font = '700 11px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${c.wind} km/h`, 34, 72);
+    ctx.restore();
   }
 
   function dot(x, y, fill, label, selected) {
@@ -605,6 +838,14 @@
     const n = currentN();
     const hs = holeScore(n);
     const h = holeData(n);
+    if (ui.pickTarget) {
+      ui.target = GC.screenToWorld(cam, mapView, p);
+      ui.pickTarget = false;
+      if (!ui.clubManual) ui.selectedClub = suggestClub(n);
+      drawMap();
+      renderHoleUi();
+      return;
+    }
     // ¿toca un golpe ya apuntado? -> editarlo
     if (ui.moveIndex == null && !ui.pendingDrop) {
       for (let i = hs.entries.length - 1; i >= 0; i--) {
@@ -648,6 +889,8 @@
       }
       hs.entries.push({ t: 's', x, y, c: ui.selectedClub, l: detectLie(h, x, y) });
       ui.editIndex = null;
+      ui.target = null;
+      ui.clubManual = false;
       const last = hs.entries[hs.entries.length - 1];
       if (last.l === 'water' || last.l === 'ob') {
         toast(last.l === 'water' ? 'Bola al agua: añade la penalización si dropas.' : 'Fuera de límites: añade la penalización.');
@@ -685,6 +928,7 @@
 
     let hint;
     if (hs.done) hint = `Hoyo terminado en ${st.strokes}. Toca › para el siguiente.`;
+    else if (ui.pickTarget) hint = 'Toca en el mapa el punto al que quieres jugar.';
     else if (ui.moveIndex != null) hint = `Toca la nueva posición del golpe ${ui.moveIndex + 1}.`;
     else if (ui.pendingDrop) hint = 'Toca dónde dropas la bola.';
     else if (hs.putts > 0) hint = 'Putts apuntados: pulsa «Terminar hoyo» al embocar.';
@@ -694,7 +938,7 @@
 
     const sheet = app.querySelector('#sheet');
     const status = `<div class="status"><span>Golpe <b class="num">${st.strokes + 1}</b> · desde <b>${lieName(st.lie)}</b></span>
-      <span>A bandera <b class="num">${Math.round(st.toPin)} m</b>${h.elev ? ` · juega ${Math.round(GC.playsLike(h, positions(n).slice(-1)[0], h.pin))}` : ''}</span></div>`;
+      <span>A bandera <b class="num">${Math.round(st.toPin)} m</b></span></div>`;
 
     const chips = hs.entries.map((e, i) => {
       const pos = positions(n);
@@ -714,8 +958,34 @@
       </div>`;
     }
 
+    const c = round.cond || (round.cond = { temp: bag.tref, wind: 0, from: 270 });
+    const condLine = `<div class="row cond"><span class="muted">${c.temp}° · ${c.wind ? `viento ${c.wind} km/h del ${dirName(c.from)}` : 'sin viento'}</span>
+      <span class="grow"></span>
+      <button class="btn small" id="cond-btn" aria-expanded="${ui.condOpen}">${ui.condOpen ? 'Listo' : 'Condiciones'}</button>
+      ${hs.done ? '' : `<button class="btn small" id="target-btn">${ui.pickTarget ? 'Toca el objetivo…' : ui.target ? 'Objetivo: punto ✕' : 'Objetivo: bandera'}</button>`}</div>
+      ${ui.condOpen ? `<div class="editor">${condControls(c, 'h-')}</div>` : ''}`;
+    const rec = recommend(n);
+    const term = (v, label) => (Math.abs(v) < 0.5 ? '' : ` ${v > 0 ? '+' : '−'} ${Math.round(Math.abs(v))} ${label}`);
+    let recHtml = '';
+    if (rec) {
+      const m = rec.model;
+      const parts = [];
+      if (Math.abs(m.drift) >= 0.5) parts.push(`viento cruzado ${Math.round(Math.abs(m.drift))} m`);
+      if (Math.abs(rec.curve) >= 0.5) parts.push(`tu ${rec.cfg.shape} ${Math.round(Math.abs(rec.curve))} m`);
+      recHtml = `<div class="rec">
+        <div class="rec-main"><span class="rec-k">Recomendado</span><b>${rec.club.name}</b>
+          <span class="muted">${rec.partial ? 'golpe corto, a media distancia' : `${rec.cfg.dist} m habitual${rec.alt ? ' · o ' + rec.alt : ''}`}</span>
+          <span class="grow"></span>${ui.selectedClub === rec.club.id ? '' : '<button class="btn small" id="use-rec">Usar</button>'}</div>
+        <div class="rec-calc">Juega <b class="num">${Math.round(m.total)} m</b> = ${Math.round(m.D)} m${term(m.elev, 'de desnivel')}${term(m.wind, m.head > 0 ? 'de viento en contra' : 'de viento a favor')}${term(m.temp, 'por temperatura')}</div>
+        ${Math.abs(rec.aimRight) >= 1 ? `<div class="rec-aim">Apunta ${Math.round(Math.abs(rec.aimRight))} m a la ${rec.aimRight < 0 ? 'izquierda' : 'derecha'} (${parts.join(', ')})</div>` : ''}
+        ${rec.warn ? `<div class="rec-warn">Cuidado: ${rec.warn}.</div>` : ''}
+      </div>`;
+    }
+
     sheet.innerHTML = `${status}
-      ${hs.done ? '' : `<div class="clubs" id="clubs">${CLUBS.map((c) => `<button data-k="${c.id}" aria-pressed="${ui.selectedClub === c.id}">${c.name}</button>`).join('')}</div>`}
+      ${condLine}
+      ${recHtml}
+      ${hs.done ? '' : `<div class="clubs" id="clubs">${CLUBS.filter((x) => bagClub(x.id).on || x.id === ui.selectedClub).map((x) => `<button data-k="${x.id}" aria-pressed="${ui.selectedClub === x.id}">${x.name}</button>`).join('')}</div>`}
       ${chips ? `<div class="shots" id="shots">${chips}</div>` : ''}
       ${editor}
       <div class="row">
@@ -731,7 +1001,28 @@
         ${hs.done ? '<button class="btn" id="reopen">Reabrir hoyo</button>' : `<button class="btn primary" id="finish" ${st.strokes ? '' : 'disabled'}>Terminar hoyo · ${st.strokes}</button>`}
       </div>`;
 
-    sheet.querySelectorAll('#clubs button').forEach((b) => (b.onclick = () => { ui.selectedClub = b.dataset.k; renderHoleUi(); }));
+    sheet.querySelectorAll('#clubs button').forEach((b) => (b.onclick = () => { ui.selectedClub = b.dataset.k; ui.clubManual = true; renderHoleUi(); }));
+    sheet.querySelector('#cond-btn').onclick = () => { ui.condOpen = !ui.condOpen; renderHoleUi(); };
+    bindCond(sheet, c, 'h-', () => {
+      if (!ui.clubManual) ui.selectedClub = suggestClub(n);
+      Store.save(round);
+      drawMap();
+      renderHoleUi();
+    });
+    const tb = sheet.querySelector('#target-btn');
+    if (tb) tb.onclick = () => {
+      if (ui.target || ui.pickTarget) {
+        ui.target = null;
+        ui.pickTarget = false;
+        if (!ui.clubManual) ui.selectedClub = suggestClub(n);
+        drawMap();
+      } else {
+        ui.pickTarget = true;
+      }
+      renderHoleUi();
+    };
+    const ur = sheet.querySelector('#use-rec');
+    if (ur) ur.onclick = () => { ui.selectedClub = rec.club.id; ui.clubManual = false; renderHoleUi(); };
     const sel = sheet.querySelector('#clubs button[aria-pressed="true"]');
     if (sel) sel.scrollIntoView({ block: 'nearest', inline: 'center' });
     sheet.querySelectorAll('#shots .shot-chip').forEach((b) => (b.onclick = () => {
@@ -841,6 +1132,89 @@
     const y = k0 * (M + N * Math.tan(phi) * ((A * A) / 2 + ((5 - T + 9 * C + 4 * C * C) * A ** 4) / 24
       + ((61 - 58 * T + T * T + 600 * C - 330 * ep2) * A ** 6) / 720));
     return { x, y };
+  }
+
+  // ---------- mi bolsa: vista ----------
+
+  function renderBag() {
+    view = 'bag';
+    teardownMap();
+    app.className = 'wrap';
+    const avg = clubAverages(rounds);
+    const count = CLUBS.filter((c) => bagClub(c.id).on).length + 1;
+    app.innerHTML = `
+      <div class="card-head"><div><h2>Mi bolsa</h2><div class="muted" id="bag-count">${count}/14 palos contando el putter</div></div></div>
+      <div class="row" style="margin:14px 0"><button class="btn" id="home">‹ Vueltas</button></div>
+      <div class="panel stack">
+        <div class="field"><label>Temperatura a la que das esas distancias</label>
+          <span class="stepper"><button id="tref-minus" aria-label="Menos grados">−</button><span class="val">${bag.tref}°</span><button id="tref-plus" aria-label="Más grados">+</button></span></div>
+        <p class="note">Distancia habitual: dónde suele quedar la bola con un golpe normal, sin viento y a esa temperatura.
+          Con el vuelo, la altura y el fallo, el recomendador corrige el punto de mira y te avisa si tu fallo acaba en un obstáculo.</p>
+      </div>
+      <div class="bag-list">${CLUBS.map((c) => clubCard(c, avg[c.id])).join('')}</div>
+      <p class="foot"><a href="jugar.html">Modo juego</a></p>`;
+    app.querySelector('#home').onclick = renderHome;
+    app.querySelector('#tref-minus').onclick = () => { bag.tref = Math.max(-5, bag.tref - 1); Store.saveBag(bag); renderBag(); };
+    app.querySelector('#tref-plus').onclick = () => { bag.tref = Math.min(40, bag.tref + 1); Store.saveBag(bag); renderBag(); };
+    CLUBS.forEach((c) => bindClubCard(c, avg[c.id]));
+  }
+
+  function clubCard(c, measured) {
+    const cfg = bagClub(c.id);
+    const m = measured && measured.length ? Math.round(measured.reduce((a, b) => a + b, 0) / measured.length) : null;
+    const seg = (field, opts) => `<div class="seg" data-f="${field}">${opts.map(([k, l]) => `<button data-k="${k}" aria-pressed="${cfg[field] === k}">${l}</button>`).join('')}</div>`;
+    return `<div class="club-card${cfg.on ? '' : ' off'}" id="club-${c.id}">
+      <div class="club-head"><b>${c.name}</b>
+        <label class="switch"><input type="checkbox" id="on-${c.id}" ${cfg.on ? 'checked' : ''}> En la bolsa</label></div>
+      ${cfg.on ? `<div class="club-body">
+        <div class="field"><label for="dist-${c.id}">Distancia habitual</label>
+          <div class="row"><span class="stepper"><button data-d="-5" aria-label="5 m menos">−</button>
+            <input class="val num" id="dist-${c.id}" type="number" inputmode="numeric" min="5" max="320" value="${cfg.dist}">
+            <button data-d="5" aria-label="5 m más">+</button></span><span class="stepper-label">m</span>
+            ${m ? `<span class="muted measured">medido ${m} m en ${measured.length} golpe${measured.length === 1 ? '' : 's'}</span><button class="btn small" data-use="${m}">Usar</button>` : ''}</div></div>
+        <div class="field"><label>Vuelo habitual</label>${seg('shape', SHAPES)}</div>
+        <div class="field"><label>Altura de bola</label>${seg('height', HEIGHTS)}</div>
+        <div class="field"><label>Fallo más repetido</label>${seg('miss', MISSES)}</div>
+      </div>` : ''}
+    </div>`;
+  }
+
+  function bindClubCard(c, measured) {
+    const el = app.querySelector('#club-' + c.id);
+    const cfg = bag.clubs[c.id] || (bag.clubs[c.id] = bagClub(c.id));
+    const redraw = () => {
+      el.outerHTML = clubCard(c, measured);
+      bindClubCard(c, measured);
+      const cnt = app.querySelector('#bag-count');
+      if (cnt) cnt.textContent = `${CLUBS.filter((x) => bagClub(x.id).on).length + 1}/14 palos contando el putter`;
+      Store.saveBag(bag);
+    };
+    el.querySelector('#on-' + c.id).onchange = (e) => {
+      if (e.target.checked && CLUBS.filter((x) => bagClub(x.id).on).length + 1 >= 14) {
+        e.target.checked = false;
+        toast('Las reglas permiten 14 palos como máximo, putter incluido.');
+        return;
+      }
+      cfg.on = e.target.checked;
+      redraw();
+    };
+    if (!cfg.on) return;
+    const input = el.querySelector('#dist-' + c.id);
+    input.onchange = () => {
+      const v = Math.round(Number(input.value));
+      if (v >= 5 && v <= 320) cfg.dist = v;
+      redraw();
+    };
+    el.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => {
+      cfg.dist = GC.clamp(cfg.dist + Number(b.dataset.d), 5, 320);
+      redraw();
+    }));
+    const use = el.querySelector('[data-use]');
+    if (use) use.onclick = () => { cfg.dist = Number(use.dataset.use); redraw(); };
+    el.querySelectorAll('.seg[data-f]').forEach((sg) => sg.querySelectorAll('button').forEach((b) => (b.onclick = () => {
+      cfg[sg.dataset.f] = b.dataset.k;
+      redraw();
+    })));
   }
 
   // ---------- tarjeta ----------
@@ -962,6 +1336,11 @@
   let listLoaded = false;
   renderHome();
   Store.init().then(async () => {
+    const savedBag = await Store.loadBag();
+    if (savedBag && savedBag.clubs) {
+      const base = defaultBag();
+      bag = { ...base, ...savedBag, clubs: { ...base.clubs, ...savedBag.clubs } };
+    }
     const loaded = await Store.list();
     const ids = new Set(loaded.map((r) => r.id));
     rounds = loaded.concat(rounds.filter((r) => !ids.has(r.id)));

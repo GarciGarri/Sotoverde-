@@ -187,3 +187,30 @@ table.score tr.link { cursor: pointer; }
   max-width: calc(100% - 32px);
 }
 @media (prefers-reduced-motion: no-preference) { .toast { transition: opacity .2s; } }
+
+/* ---------- recomendación ---------- */
+.rec { border: 1px solid var(--accent); background: var(--accent-soft); border-radius: var(--radius); padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.rec-main { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 14px; }
+.rec-main b { font: 700 22px/1 var(--font-display); }
+.rec-k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); font-weight: 700; }
+.rec-calc b { font-size: 16px; }
+.rec-aim { color: var(--ink); }
+.rec-warn { color: var(--over); font-weight: 600; }
+.cond { font-size: 13px; }
+
+/* ---------- mi bolsa ---------- */
+.bag-summary { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; font-size: 14px; }
+.bag-summary .num { font-size: 17px; }
+.note { margin: 0; font-size: 13px; color: var(--muted); max-width: 65ch; }
+.bag-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.club-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+.club-card.off { background: transparent; border-style: dashed; }
+.club-card.off b { color: var(--muted); }
+.club-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.club-head b { font: 700 22px/1 var(--font-display); }
+.switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.switch input { width: 20px; height: 20px; accent-color: var(--accent); }
+.club-body { display: flex; flex-direction: column; gap: 10px; }
+.stepper input.val { width: 64px; height: 40px; border: none; background: transparent; color: var(--ink); text-align: center; font: 700 22px/1 var(--font-display); -moz-appearance: textfield; }
+.stepper input.val::-webkit-outer-spin-button, .stepper input.val::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.measured { font-size: 13px; }

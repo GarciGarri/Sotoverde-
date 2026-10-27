@@ -2,7 +2,14 @@
 
 **Mis vueltas** (`index.html`): apunta los golpes de una vuelta real en Golf Sotoverde tocando en el mapa de
 cada hoyo dónde quedó la bola (palo, distancia y lie automáticos), con penalizaciones, putts, tarjeta y
-estadísticas (calles, greens en regulación, distancia media por palo). En la página publicada las vueltas se
+estadísticas (calles, greens en regulación, distancia media por palo).
+
+**Mi bolsa**: cada palo con su distancia habitual, vuelo (recto, draw, fade, gancho, slice), altura de bola y
+fallo más repetido. En cada golpe recomienda palo y punto de mira según la distancia que juega el golpe:
+desnivel real del MDT (1 m de subida ≈ 1 m más), viento (+0,62 %/km/h de cara, −0,31 %/km/h a favor; ×1,3 con
+bola alta y ×0,7 con bola baja), temperatura (−0,2 %/°C sobre la de referencia) y deriva por viento cruzado
+y por el vuelo habitual; avisa si el fallo habitual acaba en agua, búnker o fuera de límites.
+Son reglas de campo aproximadas, no un modelo balístico. En la página publicada las vueltas se
 guardan en la cuenta de cada persona; abierto en local, en el navegador. El botón GPS funciona donde el
 navegador da la ubicación (no dentro de claude.ai).
 
