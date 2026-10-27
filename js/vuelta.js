@@ -181,6 +181,9 @@
    */
   function mergeRounds(remote, local) {
     const out = clone(local);
+    // datos que solo tiene la versión de la cuenta (p. ej. añadidos después a una tarjeta importada)
+    for (const k of Object.keys(remote)) if (!(k in out)) out[k] = clone(remote[k]);
+    if (remote.official && local.official) out.official = { ...clone(remote.official), ...clone(local.official) };
     const cleared = { ...(remote.cleared || {}), ...(local.cleared || {}) };
     for (const [n, t] of Object.entries(remote.cleared || {})) cleared[n] = Math.max(t, (local.cleared || {})[n] || 0);
     const holes = new Set(Object.keys(remote.scores || {}).concat(Object.keys(local.scores || {})));
