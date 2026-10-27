@@ -8,6 +8,36 @@
 
   const WIND_FACTOR = 0.35;
   GC.ROLL_GRAVITY = 9.81 * (5 / 7); // aceleración de una bola rodando por unidad de pendiente
+  GC.BOUNCE_KICK = 14; // m/s cuesta abajo por unidad de pendiente al botar en una ladera
+  GC.MAX_KICK = 5;
+
+  // Aceleración que el terreno da a la bola en (x, y) según la superficie.
+  GC.slopeAccel = function (h, x, y, surf) {
+    if (surf === 'green') return { x: h.slope.x, y: h.slope.y };
+    if (!h.elev || surf === 'sand') return { x: 0, y: 0 };
+    const g = h.gradAt(x, y);
+    return { x: -GC.ROLL_GRAVITY * g.x, y: -GC.ROLL_GRAVITY * g.y };
+  };
+
+  // Velocidad tras el bote: la rodadura del golpe más el rebote hacia el lado bajo de la ladera.
+  GC.landingVelocity = function (h, pos, dir, rollSpeed, surf) {
+    const info = GC.SURFACES[surf];
+    let vx = dir.x * rollSpeed;
+    let vy = dir.y * rollSpeed;
+    if (h.elev && surf !== 'green' && info.kick) {
+      const g = h.gradAt(pos.x, pos.y);
+      let kx = -g.x * GC.BOUNCE_KICK * info.kick;
+      let ky = -g.y * GC.BOUNCE_KICK * info.kick;
+      const k = Math.hypot(kx, ky);
+      if (k > GC.MAX_KICK) {
+        kx *= GC.MAX_KICK / k;
+        ky *= GC.MAX_KICK / k;
+      }
+      vx += kx;
+      vy += ky;
+    }
+    return { x: vx, y: vy };
+  };
 
   // Distancia que "juega" un golpe: la recta más el desnivel (1 m de subida ≈ 1 m más).
   GC.playsLike = (h, from, to) => GC.dist(from, to) + (h.heightAt(to.x, to.y) - h.heightAt(from.x, from.y));
@@ -83,8 +113,10 @@
   GC.puttDistance = (power) => GC.MAX_PUTT * Math.pow(GC.clamp(power, 0, 1), 1.5);
 
   GC.startRoll = function (pos, dir, speed) {
-    return { x: pos.x, y: pos.y, vx: dir.x * speed, vy: dir.y * speed, time: 0, lipped: false, result: null };
+    return GC.startRollV(pos, { x: dir.x * speed, y: dir.y * speed });
   };
+
+  GC.startRollV = (pos, v) => ({ x: pos.x, y: pos.y, vx: v.x, vy: v.y, time: 0, lipped: false, result: null });
 
   /*
    * Avanza la rodadura dt segundos. Rellena roll.result con:
@@ -110,15 +142,10 @@
         roll.vx -= (roll.vx / speed) * dec;
         roll.vy -= (roll.vy / speed) * dec;
       }
-      if (surf === 'green') {
-        // en el green manda el plano ajustado (el MDT de 5 m es demasiado grueso)
-        roll.vx += h.slope.x * step;
-        roll.vy += h.slope.y * step;
-      } else if (h.elev && surf !== 'sand') {
-        const g = h.gradAt(roll.x, roll.y);
-        roll.vx -= GC.ROLL_GRAVITY * g.x * step;
-        roll.vy -= GC.ROLL_GRAVITY * g.y * step;
-      }
+      // en el green manda el plano ajustado (el MDT de 5 m es demasiado grueso para él)
+      const acc = GC.slopeAccel(h, roll.x, roll.y, surf);
+      roll.vx += acc.x * step;
+      roll.vy += acc.y * step;
       roll.x += roll.vx * step;
       roll.y += roll.vy * step;
       speed = Math.hypot(roll.vx, roll.vy);
@@ -147,7 +174,8 @@
         roll.lipped = false;
       }
 
-      if (speed < 0.04 || roll.time > 25) {
+      // se para si va despacio y la pendiente no puede con el rozamiento de la hierba
+      if ((speed < 0.04 && Math.hypot(acc.x, acc.y) < info.friction) || roll.time > 25) {
         roll.vx = roll.vy = 0;
         roll.result = 'stopped';
       }

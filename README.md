@@ -20,8 +20,13 @@ Controles:
 5. **Efecto**: atrás / normal / adelante cambia la rodadura tras el bote.
 6. **Green**: el putter no tiene aguja; las flechas animadas marcan la caída.
 7. `V` o 🔭: ver el hoyo entero.
+8. `P` o **2D**: plano topográfico con curvas de nivel cada metro, altitud del tee, del green y de la bola,
+   desnivel tee → green y perfil de alturas (toca el perfil para leer la altura en cada punto).
 
 Agua o fuera de límites: +1 golpe y se repite desde donde estaba la bola.
+
+La bola sigue el relieve real: al botar en una ladera sale despedida hacia el lado bajo y, si la pendiente
+empuja más de lo que frena la hierba, sigue rodando (por ejemplo, del talud derecho del hoyo 3 a la calle).
 
 ## Cómo se replica un hoyo real
 

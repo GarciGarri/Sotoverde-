@@ -71,6 +71,8 @@
       height: 0,
       timer: 0,
       overview: false,
+      plan: false,
+      probe: null,
       cam: null,
       result: null,
     };
@@ -234,7 +236,7 @@
 
   function desiredCamera() {
     const fitAll = cameraFor(GC.holeCorners(hole), 4, 0.1, 50);
-    if (g.overview) return fitAll;
+    if (g.overview || g.plan) return fitAll;
     const minZoom = fitAll.zoom;
     if (g.state === 'flight' && g.shot) return cameraFor([g.shot.start, g.shot.landing], 30, minZoom, 9);
     if (g.state === 'roll' && g.roll) {
@@ -271,6 +273,11 @@
   canvas.addEventListener('pointerdown', (e) => {
     if (!g) return;
     const p = pointer(e);
+    if (g.plan) {
+      canvas.setPointerCapture(e.pointerId);
+      probeAt(p);
+      return;
+    }
     if (g.state === 'accuracy') {
       strike();
       return;
@@ -292,6 +299,10 @@
   canvas.addEventListener('pointermove', (e) => {
     if (!g) return;
     const p = pointer(e);
+    if (g.plan) {
+      if (e.buttons || e.pointerType === 'mouse') probeAt(p);
+      return;
+    }
     if (g.state === 'pulling') {
       g.pull.now = p;
       const d = Math.hypot(p.x - g.pull.start.x, p.y - g.pull.start.y);
@@ -334,6 +345,8 @@
       if (g.state === 'accuracy') strike();
     } else if (e.key === 'v' || e.key === 'V') {
       g.overview = !g.overview;
+    } else if (e.key === 'p' || e.key === 'P') {
+      togglePlan();
     } else if (e.key === 'Escape' && g.state === 'pulling') {
       g.state = 'aim';
       g.power = 0;
@@ -341,6 +354,15 @@
   });
 
   $('#btn-view').addEventListener('click', () => g && (g.overview = !g.overview));
+  $('#btn-plan').addEventListener('click', togglePlan);
+
+  function togglePlan() {
+    if (!g || ['pulling', 'accuracy', 'flight'].includes(g.state)) return;
+    g.plan = !g.plan;
+    g.probe = null;
+    document.body.classList.toggle('plan', g.plan);
+    $('#btn-plan').classList.toggle('on', g.plan);
+  }
   // volver atrás conserva la página de origen aunque no se llame index.html
   const exit = () => (params.get('volver') || history.length <= 1 ? (location.href = exitUrl) : history.back());
   $('#btn-exit').addEventListener('click', exit);
@@ -390,7 +412,12 @@
       const a = Math.random() * Math.PI * 2;
       g.ball = { x: tree.x + Math.cos(a) * tree.r * 0.8, y: tree.y + Math.sin(a) * tree.r * 0.8 };
       toast('¡Árbol!', 'bad');
-      return afterRoll(hole.surfaceAt(g.ball.x, g.ball.y) === 'water' ? 'water' : 'stopped');
+      const under = hole.surfaceAt(g.ball.x, g.ball.y);
+      if (under === 'water' || under === 'ob') return afterRoll(under);
+      // cae casi parada, pero si está en un talud rueda cuesta abajo
+      g.roll = GC.startRollV(g.ball, GC.landingVelocity(hole, g.ball, s.dir, 0, under));
+      g.state = 'roll';
+      return;
     }
 
     const surf = hole.surfaceAt(p.x, p.y);
@@ -404,7 +431,8 @@
       dist = -dist;
     }
     if (surf === 'sand') toast('Búnker', 'bad');
-    g.roll = GC.startRoll(p, dir, GC.speedFor(dist, GC.SURFACES[surf].friction));
+    const speed = GC.speedFor(dist, GC.SURFACES[surf].friction);
+    g.roll = GC.startRollV(p, GC.landingVelocity(hole, p, dir, speed, surf));
     g.state = 'roll';
   }
 
@@ -536,6 +564,11 @@
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.fillStyle = GC.COLORS.forest;
     ctx.fillRect(0, 0, W, H);
+    if (g.plan) {
+      renderPlanView();
+      drawWind();
+      return;
+    }
 
     ctx.save();
     GC.applyCamera(ctx, g.cam, view);
@@ -550,6 +583,307 @@
     if (g.state === 'pulling') drawPower();
     if (g.state === 'accuracy') drawNeedle();
     drawWind();
+  }
+
+  // ---------- Plano 2D con alturas ----------
+
+  const fmt = (v, dec = 1) => v.toLocaleString('es-ES', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  const signed = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±') + fmt(Math.abs(v));
+
+  // Rectángulo del perfil (pantalla) y su zona de dibujo.
+  function profileBox() {
+    const x = 12;
+    const w = W - 24;
+    const hgt = 196;
+    const y = H - hgt - 12;
+    return { x, y, w, h: hgt, px: x + 46, py: y + 34, pw: w - 46 - 14, ph: hgt - 34 - 30 };
+  }
+
+  function profileData() {
+    if (!hole.planProfile) {
+      const pts = GC.profile(hole, hole.tee, hole.pin, 1);
+      pts.forEach((p) => (p.surf = hole.surfaceAt(p.x, p.y)));
+      hole.planProfile = pts;
+      hole.planLabels = GC.contourLabels(hole);
+    }
+    return hole.planProfile;
+  }
+
+  function probeAt(p) {
+    const b = profileBox();
+    if (p.x < b.px || p.x > b.px + b.pw || p.y < b.y || p.y > b.y + b.h) {
+      g.probe = null;
+      return;
+    }
+    const prof = profileData();
+    const len = prof[prof.length - 1].d;
+    g.probe = GC.clamp(((p.x - b.px) / b.pw) * len, 0, len);
+  }
+
+  function niceStep(range, target) {
+    const raw = range / target;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    for (const m of [1, 2, 5, 10]) if (raw <= m * mag) return m * mag;
+    return 10 * mag;
+  }
+
+  function haloText(text, x, y, opts = {}) {
+    ctx.save();
+    ctx.font = opts.font || '600 12px system-ui, sans-serif';
+    ctx.textAlign = opts.align || 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = opts.halo || 'rgba(245,247,236,0.95)';
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = opts.color || '#3a2a12';
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
+  function renderPlanView() {
+    const prof = profileData();
+    ctx.save();
+    GC.applyCamera(ctx, g.cam, view);
+    GC.renderPlan(ctx, hole, g.cam.zoom);
+    ctx.restore();
+
+    for (const l of hole.planLabels) {
+      const p = w2s(l);
+      haloText(`${fmt(l.level, 0)}`, p.x, p.y, { font: '600 11px system-ui, sans-serif', color: '#5a3c19' });
+    }
+
+    // línea del perfil
+    const t = w2s(hole.tee);
+    const f = w2s(hole.pin);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(30,30,30,0.75)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(t.x, t.y);
+    ctx.lineTo(f.x, f.y);
+    ctx.stroke();
+    ctx.restore();
+
+    const zt = GC.altitude(hole, hole.tee);
+    const zg = GC.altitude(hole, hole.pin);
+    spot(t, `Tee ${fmt(zt)} m`, '#f6d84a');
+    spot(f, `Green ${fmt(zg)} m`, '#e8312f');
+    if (GC.dist(g.ball, hole.tee) > 3 && GC.dist(g.ball, hole.pin) > 1) {
+      spot(w2s(g.ball), `Bola ${fmt(GC.altitude(hole, g.ball))} m`, '#ffffff');
+    }
+    if (g.probe != null) {
+      const k = Math.round((g.probe / prof[prof.length - 1].d) * (prof.length - 1));
+      const q = w2s(prof[k]);
+      ctx.fillStyle = '#1d4fd8';
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    drawNorth();
+
+    // titular: desnivel tee → green (a la izquierda, sin tapar los botones laterales)
+    const dz = zg - zt;
+    const vp = viewport();
+    const lines = [`Tee → green: ${signed(dz)} m (${dz < 0 ? 'baja' : 'sube'})`, `Juega como ${Math.round(GC.playsLike(hole, hole.tee, hole.pin))} m`];
+    ctx.save();
+    ctx.font = '700 13px system-ui, sans-serif';
+    const w = Math.min(W - 90, Math.max(...lines.map((l) => ctx.measureText(l).width)) + 24);
+    ctx.fillStyle = 'rgba(10,30,16,0.88)';
+    roundRect(12, vp.top, w, 44, 12);
+    ctx.fill();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#f4f8f2';
+    ctx.fillText(lines[0], 24, vp.top + 14, w - 24);
+    ctx.font = '500 12px system-ui, sans-serif';
+    ctx.fillStyle = '#b9cdb8';
+    ctx.fillText(lines[1], 24, vp.top + 31, w - 24);
+    ctx.restore();
+
+    drawProfile(prof, zt, zg);
+  }
+
+  function spot(p, text, color) {
+    ctx.fillStyle = color;
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    haloText(text, p.x, p.y - 16, { font: '700 12px system-ui, sans-serif', color: '#1c1c1c' });
+  }
+
+  function drawNorth() {
+    const x = 34;
+    const y = viewport().top + 90;
+    const v = { x: 0, y: -1 };
+    const r = g.cam.rot;
+    const sx = v.x * Math.cos(r) - v.y * Math.sin(r);
+    const sy = v.x * Math.sin(r) + v.y * Math.cos(r);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = 'rgba(245,247,236,0.9)';
+    ctx.beginPath();
+    ctx.arc(0, 0, 18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.rotate(Math.atan2(sy, sx) + Math.PI / 2);
+    ctx.fillStyle = '#b3261e';
+    ctx.beginPath();
+    ctx.moveTo(0, -13);
+    ctx.lineTo(5, 2);
+    ctx.lineTo(-5, 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#3a3a3a';
+    ctx.beginPath();
+    ctx.moveTo(0, 13);
+    ctx.lineTo(5, 2);
+    ctx.lineTo(-5, 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    haloText('N', x, y - 26, { font: '800 11px system-ui, sans-serif' });
+  }
+
+  function drawProfile(prof, zt, zg) {
+    const b = profileBox();
+    const len = prof[prof.length - 1].d;
+    let zmin = Infinity;
+    let zmax = -Infinity;
+    for (const p of prof) {
+      zmin = Math.min(zmin, p.z);
+      zmax = Math.max(zmax, p.z);
+    }
+    const zs = niceStep(Math.max(zmax - zmin, 2), 3);
+    zmin = Math.floor((zmin - 0.5) / zs) * zs;
+    zmax = Math.ceil((zmax + 0.5) / zs) * zs;
+    const X = (d) => b.px + (d / len) * b.pw;
+    const Y = (z) => b.py + b.ph - ((z - zmin) / (zmax - zmin)) * b.ph;
+    const muted = '#b9cdb8';
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(10,30,16,0.9)';
+    roundRect(b.x, b.y, b.w, b.h, 14);
+    ctx.fill();
+
+    ctx.fillStyle = '#f4f8f2';
+    ctx.font = '700 13px system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Perfil tee → bandera', b.x + 12, b.y + 16);
+    ctx.fillStyle = muted;
+    ctx.font = '500 11px system-ui, sans-serif';
+    ctx.textAlign = 'right';
+    const ratio = Math.round((b.pw / len) / (b.ph / (zmax - zmin)) * 10) / 10;
+    ctx.fillText(`línea recta · altura ×${fmt(1 / ratio, 0)}`, b.x + b.w - 12, b.y + 16);
+
+    // rejilla y ejes
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    ctx.font = '500 11px system-ui, sans-serif';
+    ctx.fillStyle = muted;
+    ctx.textAlign = 'right';
+    for (let z = zmin; z <= zmax + 1e-6; z += zs) {
+      ctx.beginPath();
+      ctx.moveTo(b.px, Y(z));
+      ctx.lineTo(b.px + b.pw, Y(z));
+      ctx.stroke();
+      ctx.fillText(`${fmt(z, 0)} m`, b.px - 6, Y(z));
+    }
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    const ds = niceStep(len, 5);
+    for (let d = 0; d <= len + 1e-6; d += ds) ctx.fillText(`${Math.round(d)}`, X(d), b.py + b.ph + 6);
+    ctx.textAlign = 'right';
+    ctx.fillText('m', b.px + b.pw, b.py + b.ph + 18);
+
+    // tramos sobre calle y green bajo el eje
+    for (let i = 1; i < prof.length; i++) {
+      const s = prof[i].surf;
+      if (s !== 'fairway' && s !== 'green' && s !== 'water' && s !== 'sand') continue;
+      ctx.fillStyle = s === 'green' ? '#8fe06a' : s === 'fairway' ? '#4f9a3a' : s === 'water' ? '#2f93da' : '#efdca2';
+      ctx.fillRect(X(prof[i - 1].d), b.py + b.ph + 1, X(prof[i].d) - X(prof[i - 1].d) + 0.5, 3);
+    }
+
+    // área y línea del terreno
+    const grd = ctx.createLinearGradient(0, b.py, 0, b.py + b.ph);
+    grd.addColorStop(0, 'rgba(150,185,95,0.55)');
+    grd.addColorStop(1, 'rgba(150,185,95,0.08)');
+    ctx.beginPath();
+    ctx.moveTo(X(0), Y(zmin));
+    prof.forEach((p) => ctx.lineTo(X(p.d), Y(p.z)));
+    ctx.lineTo(X(len), Y(zmin));
+    ctx.closePath();
+    ctx.fillStyle = grd;
+    ctx.fill();
+    ctx.beginPath();
+    prof.forEach((p, i) => (i ? ctx.lineTo(X(p.d), Y(p.z)) : ctx.moveTo(X(p.d), Y(p.z))));
+    ctx.strokeStyle = '#cfe39b';
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // tee, green y bola
+    const dot = (d, z, color) => {
+      ctx.fillStyle = color;
+      ctx.strokeStyle = 'rgba(10,30,16,0.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(X(d), Y(z), 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    };
+    dot(0, zt, '#f6d84a');
+    dot(len, zg, '#e8312f');
+    ctx.font = '700 11px system-ui, sans-serif';
+    ctx.fillStyle = '#f4f8f2';
+    ctx.textBaseline = 'bottom';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${fmt(zt)} m`, X(0) + 6, Y(zt) - 6);
+    ctx.textAlign = 'right';
+    ctx.fillText(`${fmt(zg)} m`, X(len) - 6, Y(zg) - 6);
+
+    const ax = hole.pin.x - hole.tee.x;
+    const ay = hole.pin.y - hole.tee.y;
+    const db = ((g.ball.x - hole.tee.x) * ax + (g.ball.y - hole.tee.y) * ay) / (len || 1);
+    if (db > 3 && db < len - 1) dot(db, GC.altitude(hole, g.ball), '#ffffff');
+
+    // lectura al tocar el perfil
+    if (g.probe != null) {
+      const k = Math.round((g.probe / len) * (prof.length - 1));
+      const p = prof[k];
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(X(p.d), b.py);
+      ctx.lineTo(X(p.d), b.py + b.ph);
+      ctx.stroke();
+      dot(p.d, p.z, '#1d4fd8');
+      const text = `${Math.round(p.d)} m · ${fmt(p.z)} m (${signed(p.z - zt)})`;
+      ctx.font = '600 12px system-ui, sans-serif';
+      const tw = ctx.measureText(text).width + 14;
+      const tx = GC.clamp(X(p.d) - tw / 2, b.px, b.px + b.pw - tw);
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
+      roundRect(tx, b.py - 2, tw, 22, 8);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, tx + 7, b.py + 9);
+    } else {
+      ctx.fillStyle = muted;
+      ctx.font = '500 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Toca el perfil para ver la altura en cada punto', b.px + b.pw / 2, b.py + 10);
+    }
+    ctx.restore();
   }
 
   function drawAim() {

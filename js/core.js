@@ -20,11 +20,12 @@
   GC.MAX_STROKES = 10;       // a partir de aquí se levanta la bola
 
   GC.SURFACES = {
-    tee:     { name: 'Tee',      friction: 1.6, landRoll: 1.0,  carry: 1.0,  scatter: 1.0 },
-    fairway: { name: 'Calle',    friction: 1.6, landRoll: 1.0,  carry: 1.0,  scatter: 1.0 },
-    green:   { name: 'Green',    friction: 0.6, landRoll: 0.7,  carry: 1.0,  scatter: 1.0 },
-    rough:   { name: 'Rough',    friction: 4.0, landRoll: 0.35, carry: 0.85, scatter: 1.6 },
-    sand:    { name: 'Búnker',   friction: 14,  landRoll: 0.05, carry: 0.6,  scatter: 2.0 },
+    tee:     { name: 'Tee',      friction: 1.6, landRoll: 1.0,  carry: 1.0,  scatter: 1.0, kick: 1.0 },
+    fairway: { name: 'Calle',    friction: 1.6, landRoll: 1.0,  carry: 1.0,  scatter: 1.0, kick: 1.0 },
+    green:   { name: 'Green',    friction: 0.6, landRoll: 0.7,  carry: 1.0,  scatter: 1.0, kick: 0.5 },
+    // rough corto (semirough): en Sotoverde casi todo lo que no es calle está segado bajo
+    rough:   { name: 'Rough',    friction: 2.2, landRoll: 0.35, carry: 0.85, scatter: 1.6, kick: 0.8 },
+    sand:    { name: 'Búnker',   friction: 14,  landRoll: 0.05, carry: 0.6,  scatter: 2.0, kick: 0 },
     water:   { name: 'Agua',     friction: 99,  landRoll: 0,    carry: 0,    scatter: 1.0 },
     ob:      { name: 'Fuera',    friction: 99,  landRoll: 0,    carry: 0,    scatter: 1.0 },
   };
@@ -581,6 +582,184 @@
     ctx.fill();
     ctx.restore();
   };
+
+  // ---------- Plano topográfico ----------
+
+  // Curvas de nivel (marching squares sobre una malla de 1 m). Altitudes absolutas.
+  GC.contours = function (h, interval = 1) {
+    const e = h.elev;
+    if (!e) return [];
+    if (e.contours && e.contours.interval === interval) return e.contours.levels;
+    const nx = Math.floor(h.width);
+    const ny = Math.floor(h.height);
+    const z = new Float32Array((nx + 1) * (ny + 1));
+    for (let j = 0; j <= ny; j++) for (let i = 0; i <= nx; i++) z[j * (nx + 1) + i] = e.base + e.heightAt(i, j);
+    const levels = [];
+    const lo = Math.ceil((e.base + e.min) / interval) * interval;
+    const hi = Math.floor((e.base + e.max) / interval) * interval;
+    for (let L = lo; L <= hi + 1e-9; L += interval) {
+      const segs = [];
+      const cross = (x0, y0, a, x1, y1, b) => {
+        const t = (L - a) / (b - a);
+        return [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t];
+      };
+      for (let j = 0; j < ny; j++) {
+        for (let i = 0; i < nx; i++) {
+          const a = z[j * (nx + 1) + i];
+          const b = z[j * (nx + 1) + i + 1];
+          const c = z[(j + 1) * (nx + 1) + i + 1];
+          const d = z[(j + 1) * (nx + 1) + i];
+          const pts = [];
+          if (a < L !== b < L) pts.push(cross(i, j, a, i + 1, j, b));
+          if (b < L !== c < L) pts.push(cross(i + 1, j, b, i + 1, j + 1, c));
+          if (c < L !== d < L) pts.push(cross(i + 1, j + 1, c, i, j + 1, d));
+          if (d < L !== a < L) pts.push(cross(i, j + 1, d, i, j, a));
+          for (let k = 0; k + 1 < pts.length; k += 2) segs.push(pts[k][0], pts[k][1], pts[k + 1][0], pts[k + 1][1]);
+        }
+      }
+      if (segs.length) levels.push({ level: Math.round(L * 100) / 100, segs: new Float32Array(segs) });
+    }
+    e.contours = { interval, levels };
+    return levels;
+  };
+
+  // Color de la tinta hipsométrica: un solo tono, claro abajo y oscuro arriba.
+  GC.PLAN_RAMP = [
+    [0, [238, 242, 222]],
+    [0.5, [190, 205, 150]],
+    [1, [112, 132, 72]],
+  ];
+  GC.planTint = function (t) {
+    const r = GC.PLAN_RAMP;
+    t = GC.clamp(t, 0, 1);
+    let k = 0;
+    while (k < r.length - 2 && t > r[k + 1][0]) k++;
+    const [t0, c0] = r[k];
+    const [t1, c1] = r[k + 1];
+    const u = (t - t0) / (t1 - t0);
+    return c0.map((v, i) => Math.round(v + (c1[i] - v) * u));
+  };
+
+  GC.renderPlan = function (ctx, h, zoom) {
+    const e = h.elev;
+    ctx.fillStyle = '#d9ddd0';
+    ctx.fillRect(-2000, -2000, h.width + 4000, h.height + 4000);
+    if (e) {
+      if (!e.tint && typeof document !== 'undefined') {
+        const w = Math.ceil(h.width);
+        const hg = Math.ceil(h.height);
+        const c = document.createElement('canvas');
+        c.width = w;
+        c.height = hg;
+        const g = c.getContext('2d');
+        const img = g.createImageData(w, hg);
+        for (let j = 0; j < hg; j++) {
+          for (let i = 0; i < w; i++) {
+            const col = GC.planTint((e.heightAt(i, j) - e.min) / (e.max - e.min || 1));
+            const k = (j * w + i) * 4;
+            img.data[k] = col[0];
+            img.data[k + 1] = col[1];
+            img.data[k + 2] = col[2];
+            img.data[k + 3] = 255;
+          }
+        }
+        g.putImageData(img, 0, 0);
+        e.tint = c;
+      }
+      if (e.tint) ctx.drawImage(e.tint, 0, 0, e.tint.width, e.tint.height);
+    } else {
+      ctx.fillStyle = 'rgb(238,242,222)';
+      ctx.fillRect(0, 0, h.width, h.height);
+    }
+
+    const px = 1 / zoom; // un píxel de pantalla en metros
+    const outline = (path, fill, stroke, width) => {
+      if (fill) {
+        ctx.fillStyle = fill;
+        ctx.fill(path);
+      }
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = width * px;
+      ctx.stroke(path);
+    };
+    for (const p of h.fairways) outline(p.path, 'rgba(70,150,50,0.28)', 'rgba(40,110,30,0.9)', 1.5);
+    for (const p of h.water) outline(p.path, 'rgba(60,140,210,0.75)', 'rgba(30,90,160,1)', 1.5);
+    for (const p of h.bunkers) outline(p.path, 'rgba(240,215,150,0.95)', 'rgba(160,125,50,1)', 1);
+    if (h.green) outline(h.green.path, 'rgba(90,190,70,0.55)', 'rgba(30,110,30,1)', 2);
+    if (h.teeBox) outline(h.teeBox.path, 'rgba(90,190,70,0.45)', 'rgba(30,110,30,1)', 1.5);
+    ctx.strokeStyle = 'rgba(30,80,30,0.7)';
+    ctx.lineWidth = px;
+    for (const t of h.trees) {
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // curvas de nivel cada metro; maestras cada 5 m
+    for (const lv of GC.contours(h, 1)) {
+      const major = Math.abs(lv.level % 5) < 1e-6;
+      ctx.strokeStyle = major ? 'rgba(90,60,25,0.85)' : 'rgba(110,80,40,0.45)';
+      ctx.lineWidth = (major ? 1.6 : 0.8) * px;
+      ctx.beginPath();
+      const s = lv.segs;
+      for (let k = 0; k < s.length; k += 4) {
+        ctx.moveTo(s[k], s[k + 1]);
+        ctx.lineTo(s[k + 2], s[k + 3]);
+      }
+      ctx.stroke();
+    }
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(40,40,40,0.6)';
+    ctx.lineWidth = px;
+    ctx.setLineDash([6 * px, 4 * px]);
+    ctx.strokeRect(0, 0, h.width, h.height);
+    ctx.restore();
+  };
+
+  // Puntos donde rotular las curvas maestras: separados entre sí y cerca del eje del hoyo.
+  GC.contourLabels = function (h, every = 5, minGap = 45) {
+    const out = [];
+    const ax = h.pin.x - h.tee.x;
+    const ay = h.pin.y - h.tee.y;
+    const len = Math.hypot(ax, ay) || 1;
+    for (const lv of GC.contours(h, 1)) {
+      if (Math.abs(lv.level % every) > 1e-6) continue;
+      const cands = [];
+      const s = lv.segs;
+      for (let k = 0; k < s.length; k += 4) {
+        const x = (s[k] + s[k + 2]) / 2;
+        const y = (s[k + 1] + s[k + 3]) / 2;
+        if (x < 8 || y < 8 || x > h.width - 8 || y > h.height - 8) continue;
+        const off = Math.abs((x - h.tee.x) * ay - (y - h.tee.y) * ax) / len;
+        cands.push({ x, y, off });
+      }
+      cands.sort((a, b) => a.off - b.off);
+      const mine = [];
+      for (const c of cands) {
+        if (mine.length >= 3) break;
+        if (mine.every((m) => Math.hypot(m.x - c.x, m.y - c.y) > minGap)) mine.push(c);
+      }
+      mine.forEach((m) => out.push({ x: m.x, y: m.y, level: lv.level }));
+    }
+    return out;
+  };
+
+  // Perfil de alturas entre dos puntos: [{d, z}] con z absoluta.
+  GC.profile = function (h, a, b, step = 2) {
+    const len = GC.dist(a, b);
+    const n = Math.max(2, Math.ceil(len / step));
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      const x = a.x + (b.x - a.x) * t;
+      const y = a.y + (b.y - a.y) * t;
+      pts.push({ d: len * t, z: (h.elev ? h.elev.base : 0) + h.heightAt(x, y), x, y });
+    }
+    return pts;
+  };
+
+  GC.altitude = (h, p) => (h.elev ? h.elev.base + h.heightAt(p.x, p.y) : null);
 
   // Miniatura del hoyo (menú).
   GC.renderThumb = function (canvas, raw, teeKey) {

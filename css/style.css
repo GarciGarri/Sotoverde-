@@ -51,6 +51,10 @@ body.game { overflow: hidden; touch-action: none; user-select: none; -webkit-use
   background: var(--panel); font-size: 18px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 
+.round.txt { font-weight: 800; font-size: 14px; }
+.round.on { background: var(--accent); color: #2a2200; }
+body.plan .hud-bottom, body.plan .hint { display: none; }
+
 .hud-bottom {
   position: fixed; left: 0; right: 0; bottom: 0;
   padding: 8px 8px max(10px, env(safe-area-inset-bottom));
