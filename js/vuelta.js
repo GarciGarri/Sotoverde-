@@ -570,6 +570,9 @@
       </header>
       <p class="storage-note">${storage}</p>
 
+      ${GC.Tour && GC.COURSE_3D ? `<h2 class="section-title">Conoce el campo <small>Recorrido 3D hoyo a hoyo</small></h2>
+      <div class="tour" id="tour"></div>` : ''}
+
       <h2 class="section-title">Nueva vuelta</h2>
       <div class="panel stack">
         <div class="field"><label>Barras de salida</label>
@@ -604,6 +607,17 @@
     };
     renderList();
     renderHero();
+    renderTour();
+  }
+
+  // Recorrido 3D de la portada: se monta una vez con un póster y solo carga three.js al darle a reproducir.
+  // La portada se repinta a menudo (formulario), así que se reutiliza el mismo nodo y su escena WebGL.
+  let tour = null;
+  function renderTour() {
+    const el = app.querySelector('#tour');
+    if (!el) return;
+    if (tour) el.replaceWith(tour.container);
+    else tour = GC.Tour.mount(el);
   }
 
   // Portada: el hoyo 9 (salida sobre el lago) de lado a lado, del tee a la izquierda al green a la derecha.

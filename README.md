@@ -31,6 +31,13 @@ Son reglas de campo aproximadas, no un modelo balístico. En la página publicad
 guardan en la cuenta de cada persona; abierto en local, en el navegador. El botón GPS funciona donde el
 navegador da la ubicación (no dentro de claude.ai).
 
+**Conoce el campo**: en la portada, un recorrido 3D de unos 2 minutos generado en el navegador con three.js
+(se carga de cdnjs, con copia en `vendor/` por si falla). Usa el relieve real del MDT05 (exagerado ×1,6), una
+textura con los 18 hoyos, árboles y banderas; sobrevuela el campo y recorre cada hoyo del tee al green con su
+ficha: par, metros, hándicap, tipo de hoyo, desnivel, agua, búnkeres y un consejo. Todo sale de los datos de los
+hoyos salvo el hándicap (tarjeta del club) y el dog-leg del 6 (plano). Se puede pausar y saltar de hoyo.
+`tools/campo_3d.py` genera `js/campo3d.js` (malla de 5 m de todo el campo).
+
 **Modo juego** (`jugar.html`): los mismos hoyos al estilo Golf Clash.
 
 Hoyos de golf reales en vista cenital, al estilo **Golf Clash**, hechos con HTML5 Canvas y JavaScript sin dependencias.
@@ -146,13 +153,17 @@ Metros, origen arriba a la izquierda, `y` hacia abajo. Ángulos de brújula: 0 =
 ## Estructura
 
 ```
-index.html, juego.html     menú y juego
+index.html                 Mis vueltas (portada, hoyos, tarjeta, bolsa)
+jugar.html, juego.html     menú y juego
 css/style.css
 js/core.js                 geometría, superficies, palos, cámara y dibujo
 js/physics.js              vuelo con viento, bote, rodadura con pendiente
 js/game.js                 controles y lógica del juego
 js/holes.js                hoyos de ejemplo (inventados)
 js/campos.js               generado: hoyos reales de campos/*.json
+js/campo3d.js              generado: relieve de todo el campo para el recorrido 3D
+js/tour.js                 recorrido 3D de la portada (three.js)
+vendor/three.min.js        three.js r128 (MIT), por si no carga la CDN
 campos/                    hoyos reales en JSON
 datos/sotoverde/           trazados manuales, imágenes de control y fuentes
 tools/                     scripts de extracción (Python)
