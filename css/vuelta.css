@@ -191,6 +191,10 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .stepper .val { min-width: 54px; text-align: center; font: 700 26px/1 var(--font-display); }
 .stepper input.val { width: 70px; height: 44px; border: none; background: transparent; color: var(--graphite); -moz-appearance: textfield; }
 .stepper input.val::-webkit-outer-spin-button, .stepper input.val::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.stepper.sm { border-radius: 10px; }
+.stepper.sm button { width: 34px; height: 34px; font-size: 18px; }
+.stepper.sm .val { min-width: 40px; font-size: 20px; }
+.stepper.sm .val .mark { margin: 0; }
 .stepper-label { font-size: 14px; color: var(--slate); margin-left: 6px; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .row .grow { flex: 1; }
