@@ -214,3 +214,5 @@ table.score tr.link { cursor: pointer; }
 .stepper input.val { width: 64px; height: 40px; border: none; background: transparent; color: var(--ink); text-align: center; font: 700 22px/1 var(--font-display); -moz-appearance: textfield; }
 .stepper input.val::-webkit-outer-spin-button, .stepper input.val::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .measured { font-size: 13px; }
+.map-tools button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.map-tools #zoom-in, .map-tools #zoom-out { font-size: 22px; line-height: 1; }

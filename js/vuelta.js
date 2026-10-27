@@ -305,7 +305,9 @@
   let round = null;
   let view = 'home';
   const ui = {
-    selectedClub: null, clubManual: false, editIndex: null, moveIndex: null, pendingDrop: false, showAll: false,
+    selectedClub: null, clubManual: false, editIndex: null, moveIndex: null, pendingDrop: false,
+    cam: null, // cámara manual (zoom/arrastre); null = encuadre automático bola-green
+    loupe: null, // punto bajo el dedo mientras se mantiene pulsado
     target: null, pickTarget: false, condOpen: false,
   };
 
@@ -581,7 +583,8 @@
     ui.editIndex = null;
     ui.moveIndex = null;
     ui.pendingDrop = false;
-    ui.showAll = false;
+    ui.cam = null;
+    ui.loupe = null;
     const n = round.holes[idx];
     ui.selectedClub = suggestClub(n);
     view = 'hole';
@@ -596,7 +599,10 @@
       <div class="map-wrap" id="map">
         <canvas></canvas>
         <div class="map-tools">
-          <button id="zoom" aria-label="Ver el hoyo entero o acercar">Todo</button>
+          <button id="zoom-in" aria-label="Acercar">+</button>
+          <button id="zoom-out" aria-label="Alejar">−</button>
+          <button id="zoom-all" aria-label="Ver el hoyo entero">Todo</button>
+          <button id="zoom-auto" aria-label="Encuadre automático de bola y green">Auto</button>
           <button id="gps" aria-label="Usar mi posición">GPS</button>
         </div>
         <div class="map-hint" id="hint"></div>
@@ -606,8 +612,14 @@
     ctx = canvas.getContext('2d');
     app.querySelector('#prev').onclick = () => idx > 0 && openHole(idx - 1);
     app.querySelector('#next').onclick = () => (idx < round.holes.length - 1 ? openHole(idx + 1) : renderCard());
-    app.querySelector('#zoom').onclick = () => {
-      ui.showAll = !ui.showAll;
+    app.querySelector('#zoom-in').onclick = () => zoomBy(1.6);
+    app.querySelector('#zoom-out').onclick = () => zoomBy(1 / 1.6);
+    app.querySelector('#zoom-all').onclick = () => {
+      ui.cam = allCamera();
+      drawMap();
+    };
+    app.querySelector('#zoom-auto').onclick = () => {
+      ui.cam = null;
       drawMap();
     };
     app.querySelector('#gps').onclick = useGps;
@@ -636,16 +648,39 @@
     return round.holes[round.cur];
   }
 
+  const MAX_ZOOM = 40; // px por metro
+
+  function mapRect() {
+    return { w: mapView.w - 40, h: mapView.h - 110 }; // deja libre la franja del aviso inferior
+  }
+
+  function allCamera() {
+    const h = holeData(currentN());
+    return GC.fitCamera(GC.holeCorners(h), GC.holeRotation(h), mapRect(), 10, 0.05, 60);
+  }
+
   function fitCamera() {
+    if (ui.cam) return ui.cam;
     const n = currentN();
     const h = holeData(n);
-    const rot = GC.holeRotation(h);
-    const rect = { w: mapView.w - 40, h: mapView.h - 110 }; // deja libre la franja del aviso inferior
-    const all = GC.fitCamera(GC.holeCorners(h), rot, rect, 10, 0.05, 60);
-    if (ui.showAll) return all;
-    const pos = positions(n);
-    const pts = pos.concat([h.pin]);
-    return GC.fitCamera(pts, rot, rect, 30, all.zoom, 14);
+    const all = allCamera();
+    const pts = positions(n).concat([h.pin]);
+    return GC.fitCamera(pts, all.rot, mapRect(), 30, all.zoom, 14);
+  }
+
+  // Cámara con el zoom dado que deja el punto del mundo `w` bajo el punto de pantalla `p`.
+  function cameraKeeping(w, p, zoom, rot) {
+    const minZ = allCamera().zoom * 0.7;
+    const z = GC.clamp(zoom, minZ, MAX_ZOOM);
+    const off = GC.screenToWorld({ x: 0, y: 0, zoom: z, rot }, mapView, p);
+    return { x: w.x - off.x, y: w.y - off.y, zoom: z, rot };
+  }
+
+  function zoomBy(f, p) {
+    const c = fitCamera();
+    const at = p || { x: mapView.cx, y: mapView.cy };
+    ui.cam = cameraKeeping(GC.screenToWorld(c, mapView, at), at, c.zoom * f, c.rot);
+    drawMap();
   }
 
   function drawMap() {
@@ -739,7 +774,64 @@
       ctx.restore();
     }
     drawWind();
-    app.querySelector('#zoom').textContent = ui.showAll ? 'Cerca' : 'Todo';
+    app.querySelector('#zoom-auto').setAttribute('aria-pressed', String(!ui.cam));
+    // copia del mapa para dibujar la lupa encima sin volver a pintar el hoyo
+    if (!baseCanvas || baseCanvas.width !== canvas.width || baseCanvas.height !== canvas.height) {
+      baseCanvas = document.createElement('canvas');
+      baseCanvas.width = canvas.width;
+      baseCanvas.height = canvas.height;
+    }
+    baseCanvas.getContext('2d').drawImage(canvas, 0, 0);
+    if (ui.loupe) drawLoupe();
+  }
+
+  let baseCanvas = null;
+
+  // Lupa ×3 sobre el dedo: muestra exactamente dónde se apuntará el golpe al soltar.
+  function drawLoupe() {
+    const dpr = Number(canvas.dataset.dpr) || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.drawImage(baseCanvas, 0, 0, canvas.width / dpr, canvas.height / dpr);
+    const p = ui.loupe;
+    const R = 58;
+    const Z = 3;
+    const lx = GC.clamp(p.x, R + 6, mapView.w - R - 6);
+    const ly = p.y - 110 < R + 6 ? p.y + 110 : p.y - 110;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(lx, ly, R, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(baseCanvas, (p.x - R / Z) * dpr, (p.y - R / Z) * dpr, ((2 * R) / Z) * dpr, ((2 * R) / Z) * dpr,
+      lx - R, ly - R, 2 * R, 2 * R);
+    ctx.restore();
+    ctx.save();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(lx, ly, R, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = '#ffd84a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(lx - 14, ly);
+    ctx.lineTo(lx - 4, ly);
+    ctx.moveTo(lx + 4, ly);
+    ctx.lineTo(lx + 14, ly);
+    ctx.moveTo(lx, ly - 14);
+    ctx.lineTo(lx, ly - 4);
+    ctx.moveTo(lx, ly + 4);
+    ctx.lineTo(lx, ly + 14);
+    ctx.stroke();
+    // qué hay bajo el punto y a qué distancia
+    const n = currentN();
+    const h = holeData(n);
+    const w = GC.screenToWorld(cam, mapView, p);
+    const pos = positions(n);
+    const label = ui.pickTarget
+      ? `Objetivo · ${Math.round(GC.dist(pos[pos.length - 1], w))} m`
+      : `${lieName(detectLie(h, w.x, w.y))} · ${Math.round(GC.dist(pos[pos.length - 1], w))} m · a bandera ${Math.round(GC.dist(w, h.pin))}`;
+    pill(label, lx, ly + R + 14);
+    ctx.restore();
   }
 
   // Flecha del viento, girada como el mapa (el green queda arriba).
@@ -818,20 +910,102 @@
     ctx.restore();
   }
 
+  // Gestos del mapa: toque = apuntar; mantener = lupa y apuntar al soltar; arrastrar = mover;
+  // dos dedos = zoom; rueda del ratón = zoom.
   function bindMap() {
-    let down = null;
+    const pts = new Map();
+    let g = null;
+    let timer = null;
+    let raf = 0;
+    const local = (e) => {
+      const r = canvas.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    };
+    const redraw = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        if (g && g.type === 'loupe') drawLoupe();
+        else drawMap();
+      });
+    };
+    const two = () => {
+      const [a, b] = [...pts.values()];
+      return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
+    };
     canvas.addEventListener('pointerdown', (e) => {
-      const r = canvas.getBoundingClientRect();
-      down = { x: e.clientX - r.left, y: e.clientY - r.top };
+      canvas.setPointerCapture(e.pointerId);
+      const p = local(e);
+      pts.set(e.pointerId, p);
+      clearTimeout(timer);
+      const c = fitCamera();
+      if (pts.size === 2) {
+        ui.loupe = null;
+        const t = two();
+        g = { type: 'pinch', d0: t.d, zoom0: c.zoom, rot: c.rot, w0: GC.screenToWorld(c, mapView, t.mid) };
+        redraw();
+      } else if (pts.size === 1) {
+        g = { type: 'pending', start: p, cam0: c };
+        timer = setTimeout(() => {
+          if (g && g.type === 'pending') {
+            g.type = 'loupe';
+            ui.loupe = g.start;
+            drawLoupe();
+          }
+        }, 280);
+      }
     });
-    canvas.addEventListener('pointerup', (e) => {
-      if (!down) return;
-      const r = canvas.getBoundingClientRect();
-      const p = { x: e.clientX - r.left, y: e.clientY - r.top };
-      const moved = Math.hypot(p.x - down.x, p.y - down.y);
-      down = null;
-      if (moved < 10) tapMap(p);
+    canvas.addEventListener('pointermove', (e) => {
+      if (!pts.has(e.pointerId) || !g) return;
+      const p = local(e);
+      pts.set(e.pointerId, p);
+      if (g.type === 'pinch' && pts.size === 2) {
+        const t = two();
+        ui.cam = cameraKeeping(g.w0, t.mid, g.zoom0 * (t.d / g.d0), g.rot);
+        redraw();
+      } else if (g.type === 'pending' && Math.hypot(p.x - g.start.x, p.y - g.start.y) > 10) {
+        clearTimeout(timer);
+        g.type = 'pan';
+      }
+      if (g.type === 'pan') {
+        const w0 = GC.screenToWorld(g.cam0, mapView, g.start);
+        ui.cam = cameraKeeping(w0, p, g.cam0.zoom, g.cam0.rot);
+        redraw();
+      } else if (g.type === 'loupe') {
+        ui.loupe = p;
+        redraw();
+      }
     });
+    const end = (e) => {
+      if (!pts.has(e.pointerId)) return;
+      const p = local(e);
+      pts.delete(e.pointerId);
+      clearTimeout(timer);
+      if (!g) return;
+      if (e.type === 'pointerup' && (g.type === 'pending' || g.type === 'loupe')) {
+        ui.loupe = null;
+        g = null;
+        tapMap(p, true);
+        return;
+      }
+      if (g.type === 'loupe') {
+        ui.loupe = null;
+        drawMap();
+      }
+      if (g.type === 'pinch' && pts.size === 1) {
+        // sigue con el dedo que queda como arrastre
+        const [rest] = [...pts.values()];
+        g = { type: 'pan', start: rest, cam0: fitCamera() };
+        return;
+      }
+      if (!pts.size) g = null;
+    };
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15, local(e));
+    }, { passive: false });
   }
 
   function tapMap(p) {

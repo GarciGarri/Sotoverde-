@@ -4,6 +4,10 @@
 cada hoyo dónde quedó la bola (palo, distancia y lie automáticos), con penalizaciones, putts, tarjeta y
 estadísticas (calles, greens en regulación, distancia media por palo).
 
+Mapa: pellizca con dos dedos o usa + / − para acercar, arrastra para moverte, «Todo» enseña el hoyo entero y
+«Auto» vuelve al encuadre bola-green. Mantén el dedo pulsado para sacar una lupa ×3 con el lie y la distancia
+bajo el dedo: al soltar se apunta el golpe exactamente en la cruz.
+
 **Mi bolsa**: cada palo con su distancia habitual, vuelo (recto, draw, fade, gancho, slice), altura de bola y
 fallo más repetido. En cada golpe recomienda palo y punto de mira según la distancia que juega el golpe:
 desnivel real del MDT (1 m de subida ≈ 1 m más), viento (+0,62 %/km/h de cara, −0,31 %/km/h a favor; ×1,3 con
