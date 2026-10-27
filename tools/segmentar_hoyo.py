@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 
 PX = 4  # píxeles por metro del recorte
+MIN_SAND_V = 162  # brillo medio mínimo de un búnker (las calvas secas se quedan en 150-160)
 
 
 def poly_from_mask(mask, min_area_m2, eps_m=0.6, min_solidity=0.0):
@@ -85,8 +86,18 @@ def segment(crop, x0, y0, x1, y1):
     # copas: muy oscuras y algo azuladas
     tree = (V < 62) & (B >= R) & roi & ~water
 
+    # la arena es más clara que las calvas de hierba seca, que tienen un color parecido
+    V8 = crop.max(-1).astype(np.float32)
+    bunkers = []
+    for p in poly_from_mask(sand, 6, min_solidity=0.3):
+        m = np.zeros(R.shape, np.uint8)
+        cv2.fillPoly(m, [np.array([[x * PX, y * PX] for x, y in p], np.int32)], 1)
+        inner = V8[cv2.erode(m, np.ones((5, 5), np.uint8)) > 0]
+        if len(inner) and inner.mean() >= MIN_SAND_V:
+            bunkers.append(p)
+
     return {
-        "bunkers": poly_from_mask(sand, 6, min_solidity=0.3),
+        "bunkers": bunkers,
         "water": poly_from_mask(water & roi, 100, eps_m=0.8),
         "trees": trees_from_mask(tree),
     }

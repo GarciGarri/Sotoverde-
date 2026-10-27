@@ -1,0 +1,154 @@
+{
+ "id": "sotoverde-06",
+ "name": "Sotoverde",
+ "number": 6,
+ "par": 4,
+ "card": "Tarjeta: 261 m desde amarillas, 240 m desde rojas",
+ "geo": {
+  "crs": "EPSG:25830",
+  "origin": [
+   349420,
+   4609041
+  ],
+  "width": 229,
+  "height": 267,
+  "note": "origin = esquina superior izquierda en UTM 30N; x hacia el este, y hacia el sur, en metros"
+ },
+ "segmentation_roi": [
+  3,
+  3,
+  226,
+  264
+ ],
+ "tee": {
+  "x": 193.8,
+  "y": 35.1
+ },
+ "tees": {
+  "amarillas": {
+   "x": 193.8,
+   "y": 35.1,
+   "label": "Amarillas"
+  },
+  "rojas": {
+   "x": 179.3,
+   "y": 50.3,
+   "label": "Rojas"
+  }
+ },
+ "teeBox": [
+  [
+   193.3,
+   29.1
+  ],
+  [
+   199.8,
+   35.3
+  ],
+  [
+   179.8,
+   56.3
+  ],
+  [
+   173.3,
+   50.1
+  ]
+ ],
+ "tee_source": "Dirección del plano del club; barras a la distancia de tarjeta desde el centro del green",
+ "pin": {
+  "x": 44.1,
+  "y": 231.4
+ },
+ "green": [
+  [
+   40.2,
+   218.2
+  ],
+  [
+   37.5,
+   221.2
+  ],
+  [
+   37.5,
+   227.8
+  ],
+  [
+   38.8,
+   230.8
+  ],
+  [
+   39.5,
+   240.8
+  ],
+  [
+   41.2,
+   243.0
+  ],
+  [
+   44.2,
+   244.2
+  ],
+  [
+   48.5,
+   244.2
+  ],
+  [
+   48.8,
+   241.8
+  ],
+  [
+   51.0,
+   239.5
+  ],
+  [
+   51.0,
+   233.0
+  ],
+  [
+   49.2,
+   225.2
+  ],
+  [
+   45.2,
+   218.8
+  ]
+ ],
+ "green_source": "detectado en la ortofoto a 3 m de la posición del plano",
+ "fairways": [
+  [
+   [
+    172.8,
+    77.3
+   ],
+   [
+    46.5,
+    208.9
+   ],
+   [
+    54.9,
+    218.0
+   ],
+   [
+    28.0,
+    225.4
+   ],
+   [
+    24.5,
+    191.6
+   ],
+   [
+    152.6,
+    57.9
+   ]
+  ]
+ ],
+ "fairway_source": "aproximada: franja de ancho fijo a lo largo del hoyo",
+ "tree_scale": 1.3,
+ "water_keep": [
+  [
+   149,
+   120
+  ]
+ ],
+ "course_utm": "contorno_campo.json"
+}

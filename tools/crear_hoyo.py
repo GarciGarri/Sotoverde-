@@ -14,8 +14,10 @@ Requiere: numpy, opencv-python-headless, pillow. Ortofoto y MDT © IGN (CC BY 4.
 import glob
 import io
 import json
+import math
 import os
 import sys
+import time
 import urllib.request
 
 import numpy as np
@@ -43,12 +45,28 @@ def fetch(url, tries=4):
     raise last
 
 
-def cached(path, url):
+def cached(path, url, valid=None, tries=5):
+    """Descarga a caché; si `valid(bytes)` dice que la respuesta es un error del servicio, reintenta."""
     if not os.path.exists(path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        for _ in range(tries):
+            data = fetch(url)
+            if valid is None or valid(data):
+                break
+            time.sleep(3)
+        else:
+            raise RuntimeError(f"el servicio no devolvió datos válidos para {os.path.basename(path)}")
         with open(path, "wb") as f:
-            f.write(fetch(url))
+            f.write(data)
     return path
+
+
+def is_jpeg(data):
+    return data[:2] == b"\xff\xd8"
+
+
+def is_asc(data):
+    return b"ncols" in data[:2000]
 
 
 def ortho(cfg, cache_dir):
@@ -56,7 +74,7 @@ def ortho(cfg, cache_dir):
     w, h = cfg["geo"]["width"], cfg["geo"]["height"]
     url = (f"{WMS}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=OI.OrthoimageCoverage&STYLES="
            f"&CRS=EPSG:25830&BBOX={x0},{y0 - h},{x0 + w},{y0}&WIDTH={w * PX}&HEIGHT={h * PX}&FORMAT=image/jpeg")
-    path = cached(os.path.join(cache_dir, f"{cfg['id']}_orto.jpg"), url)
+    path = cached(os.path.join(cache_dir, f"{cfg['id']}_orto.jpg"), url, is_jpeg)
     return np.array(Image.open(path).convert("RGB"))
 
 
@@ -64,25 +82,30 @@ def elevation(cfg, cache_dir, cell=5):
     x0, y0 = cfg["geo"]["origin"]
     w, h = cfg["geo"]["width"], cfg["geo"]["height"]
     m = 20  # margen para interpolar en los bordes
+    # rectángulo alineado a la malla de 5 m: si no, el servicio remuestrea y cambia el formato
+    sx0, sx1 = 5 * math.floor((x0 - m) / 5), 5 * math.ceil((x0 + w + m) / 5)
+    sy0, sy1 = 5 * math.floor((y0 - h - m) / 5), 5 * math.ceil((y0 + m) / 5)
     url = (f"{WCS}?SERVICE=WCS&VERSION=2.0.1&REQUEST=GetCoverage&COVERAGEID=Elevacion25830_5"
-           f"&SUBSET=x({x0 - m},{x0 + w + m})&SUBSET=y({y0 - h - m},{y0 + m})&FORMAT=application/asc")
-    path = cached(os.path.join(cache_dir, f"{cfg['id']}_mdt5.asc"), url)
+           f"&SUBSET=x({sx0},{sx1})&SUBSET=y({sy0},{sy1})&FORMAT=application/asc")
+    path = cached(os.path.join(cache_dir, f"{cfg['id']}_mdt5.asc"), url, is_asc)
     text = open(path, encoding="latin1").read()
     head, rows = {}, []
     for line in text.splitlines():
         parts = line.split()
-        if len(parts) == 2 and parts[0] in ("ncols", "nrows", "xllcorner", "yllcorner", "cellsize", "NODATA_value"):
+        if len(parts) == 2 and parts[0] in ("ncols", "nrows", "xllcorner", "yllcorner", "cellsize", "dx", "dy",
+                                             "NODATA_value"):
             head[parts[0]] = float(parts[1])
         elif head.get("ncols") and len(parts) == int(head["ncols"]):
             rows.append([float(v) for v in parts])
     grid = np.array(rows)
-    cs = head["cellsize"]
-    top = head["yllcorner"] + cs * grid.shape[0]
+    csx = head.get("cellsize", head.get("dx"))
+    csy = head.get("cellsize", head.get("dy"))
+    top = head["yllcorner"] + csy * grid.shape[0]
 
     def z(lx, ly):
         X, Y = x0 + lx, y0 - ly
-        c = (X - head["xllcorner"]) / cs - 0.5
-        r = (top - Y) / cs - 0.5
+        c = (X - head["xllcorner"]) / csx - 0.5
+        r = (top - Y) / csy - 0.5
         c0, r0 = int(np.floor(c)), int(np.floor(r))
         fc, fr = c - c0, r - r0
         v = grid[r0:r0 + 2, c0:c0 + 2]
@@ -202,10 +225,25 @@ def main(cfg_path):
 
     crop = ortho(cfg, cache_dir)
     auto = seg.segment(crop, *cfg["segmentation_roi"])
+    course = None
+    if cfg.get("course_utm"):
+        ring = json.load(open(os.path.join(data_dir, cfg["course_utm"]), encoding="utf-8"))["ring"]
+        gx, gy = cfg["geo"]["origin"]
+        course = [[round(X - gx, 1), round(gy - Y, 1)] for X, Y in ring]
+        inside = lambda p: point_in_poly(course, *centroid(p))  # noqa: E731
+        auto = {"bunkers": [p for p in auto["bunkers"] if inside(p)],
+                "water": [p for p in auto["water"] if inside(p)],
+                "trees": [t for t in auto["trees"] if point_in_poly(course, t["x"], t["y"])]}
+
     ex = cfg.get("exclude_points", [])
     rects = cfg.get("exclude_rects", [])  # zonas sin búnkeres ni agua reales (edificios, jardines)
     bunkers = [p for p in auto["bunkers"] if not excluded(p, ex, rects=rects)] + cfg.get("extra_bunkers", [])
-    water = [p for p in auto["water"] if not excluded(p, ex)] + cfg.get("extra_water", [])
+    water = [p for p in auto["water"] if not excluded(p, ex)]
+    if "water_keep" in cfg:  # solo lagos conocidos: el césped artificial y las sombras se parecen al agua
+        keep = cfg["water_keep"]
+        water = [p for p in water
+                 if any(point_in_poly(p, x, y) or np.hypot(*(np.array(centroid(p)) - (x, y))) < 25 for x, y in keep)]
+    water += cfg.get("extra_water", [])
     green = cfg["green"]
     tees = [cfg["tee"]] + list(cfg.get("tees", {}).values())
     box = cfg.get("teeBox")
@@ -226,6 +264,7 @@ def main(cfg_path):
         "tee": cfg["tee"], "pin": cfg["pin"],
         **({"tees": cfg["tees"]} if "tees" in cfg else {}),
         **({"teeBox": cfg["teeBox"]} if "teeBox" in cfg else {}),
+        **({"course": course} if course else {}),
         "fairways": cfg["fairways"], "green": green,
         "bunkers": bunkers, "water": water, "trees": trees,
         "greenSlope": green_slope(cfg, z, water),

@@ -152,6 +152,7 @@
       tee: GC.toPoint(teeRaw),
       teeKey: teeKey && raw.tees && raw.tees[teeKey] ? teeKey : null,
       teeBox: raw.teeBox && raw.teeBox.length >= 3 ? GC.makePoly(raw.teeBox, 1) : null,
+      course: raw.course && raw.course.length >= 3 ? GC.makePoly(raw.course, 0) : null, // límite del campo
       teeMarks: raw.tees ? Object.entries(raw.tees).map(([k, t]) => ({ key: k, x: t.x, y: t.y })) : [],
       pin: GC.toPoint(raw.pin),
       fairways: (raw.fairways || []).filter((p) => p.length >= 3).map((p) => GC.makePoly(p)),
@@ -172,6 +173,9 @@
 
     h.surfaceAt = function (x, y) {
       if (x < 0 || y < 0 || x > h.width || y > h.height) return 'ob';
+      // la zona de salida siempre está dentro, aunque el contorno de OSM pase muy pegado
+      if (h.teeBox && GC.polyContains(h.teeBox, x, y)) return 'tee';
+      if (h.course && !GC.polyContains(h.course, x, y)) return 'ob';
       for (const p of h.water) if (GC.polyContains(p, x, y)) return 'water';
       for (const p of h.bunkers) if (GC.polyContains(p, x, y)) return 'sand';
       if (h.green && GC.polyContains(h.green, x, y)) return 'green';
@@ -342,13 +346,6 @@
     ctx.fillStyle = getRoughPattern(ctx) || COLORS.rough;
     ctx.fillRect(0, 0, h.width, h.height);
 
-    // estacas de fuera de límites
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-    ctx.lineWidth = 0.6;
-    ctx.setLineDash([3, 3]);
-    ctx.strokeRect(0, 0, h.width, h.height);
-    ctx.restore();
 
     // calles
     for (const p of h.fairways) {
@@ -456,6 +453,30 @@
     }
 
     if (h.elev) drawRelief(ctx, h);
+
+    // fuera del campo (encima del terreno, por si la calle aproximada se sale): bosque y estacas
+    ctx.save();
+    if (h.course) {
+      ctx.beginPath();
+      ctx.rect(-2000, -2000, h.width + 4000, h.height + 4000);
+      h.course.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.fillStyle = COLORS.forest;
+      ctx.fill('evenodd');
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.lineWidth = 0.6;
+    ctx.setLineDash([3, 3]);
+    if (h.course) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, h.width, h.height);
+      ctx.clip();
+      ctx.stroke(h.course.path);
+      ctx.restore();
+    }
+    ctx.strokeRect(0, 0, h.width, h.height);
+    ctx.restore();
 
     // árboles: primero las sombras, luego las copas
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
@@ -710,9 +731,18 @@
     }
 
     ctx.save();
+    if (h.course) {
+      ctx.beginPath();
+      ctx.rect(-2000, -2000, h.width + 4000, h.height + 4000);
+      h.course.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(217,221,208,0.85)';
+      ctx.fill('evenodd');
+    }
     ctx.strokeStyle = 'rgba(40,40,40,0.6)';
     ctx.lineWidth = px;
     ctx.setLineDash([6 * px, 4 * px]);
+    if (h.course) ctx.stroke(h.course.path);
     ctx.strokeRect(0, 0, h.width, h.height);
     ctx.restore();
   };

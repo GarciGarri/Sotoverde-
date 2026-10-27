@@ -1,7 +1,7 @@
 # Sotoverde Clash
 
 Hoyos de golf reales en vista cenital, al estilo **Golf Clash**, hechos con HTML5 Canvas y JavaScript sin dependencias.
-Hoyos replicados del campo de **Golf Sotoverde** (Arroyo de la Encomienda, Valladolid): **1, 2 y 3**.
+Los **18 hoyos** del campo de **Golf Sotoverde** (Arroyo de la Encomienda, Valladolid), par 60, 3.185 m desde amarillas.
 
 ## Jugar
 
@@ -58,7 +58,31 @@ pasado a UTM), la bandera, el green y la calle, y vuelve a ejecutar el script. R
 arboledas con agua o edificios con búnkeres, corrígelo con `exclude_points`, `exclude_rects`, `extra_trees`
 o `extra_bunkers`.
 
+### Hoyos 4 a 18: a partir del plano del club
+
+Los hoyos 1-3 se trazaron a mano con las marcas del jugador. Para el resto, `tools/hoyos_desde_plano.py`:
+
+1. Lee las líneas tee → green del plano del club (`datos/sotoverde/plano/lineas.json`, en píxeles del plano).
+2. Ajusta el plano a la ortofoto con una semejanza usando los hoyos 1-3 y los cuatro lagos como puntos de control.
+   El plano es esquemático (3-19 m de error), así que solo dice **dónde** está cada hoyo.
+3. Busca el green en la ortofoto (zona lisa, clara y compacta más cercana a la prevista; el 15 y el 16 se
+   situaron a mano).
+4. Coloca las barras a la distancia exacta de tarjeta en la dirección del plano (el 6 tiene codo).
+5. Escribe `datos/sotoverde/hoyoNN.json`; después `tools/crear_hoyo.py` hace el resto (búnkeres, agua, árboles,
+   relieve, contorno del campo).
+
+```bash
+python3 tools/hoyos_desde_plano.py
+for n in $(seq -w 1 18); do python3 tools/crear_hoyo.py datos/sotoverde/hoyo$n.json; done
+```
+
+Fuera del contorno del campo (OpenStreetMap, `datos/sotoverde/contorno_campo.json`) es fuera de límites.
+
 ### Limitaciones conocidas
+
+- Calles de los hoyos 4-18: franja de ancho fijo a lo largo del hoyo (pares 4 y 5) o antegreen (pares 3);
+  en esta ortofoto el rough está segado y no se distingue bien de la calle. Los hoyos 1-3 están trazados a mano.
+- Barras rojas solo en la ida (la tarjeta de rojas de la vuelta no está disponible).
 
 - El MDT de 5 m da bien el desnivel general (en el hoyo 3, el green está unos 6 m por debajo del tee),
   pero no las ondulaciones finas de los greens: la caída del green es un plano aproximado (máx. 3 %).

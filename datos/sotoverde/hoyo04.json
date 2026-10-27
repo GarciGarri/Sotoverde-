@@ -1,0 +1,202 @@
+{
+ "id": "sotoverde-04",
+ "name": "Sotoverde",
+ "number": 4,
+ "par": 3,
+ "card": "Tarjeta: 122 m desde amarillas, 116 m desde rojas",
+ "geo": {
+  "crs": "EPSG:25830",
+  "origin": [
+   349290,
+   4608967
+  ],
+  "width": 193,
+  "height": 81,
+  "note": "origin = esquina superior izquierda en UTM 30N; x hacia el este, y hacia el sur, en metros"
+ },
+ "segmentation_roi": [
+  3,
+  3,
+  190,
+  78
+ ],
+ "tee": {
+  "x": 36.0,
+  "y": 45.8
+ },
+ "tees": {
+  "amarillas": {
+   "x": 36.0,
+   "y": 45.8,
+   "label": "Amarillas"
+  },
+  "rojas": {
+   "x": 42.0,
+   "y": 45.3,
+   "label": "Rojas"
+  }
+ },
+ "teeBox": [
+  [
+   32.4,
+   50.6
+  ],
+  [
+   31.6,
+   41.6
+  ],
+  [
+   45.6,
+   40.5
+  ],
+  [
+   46.3,
+   49.4
+  ]
+ ],
+ "tee_source": "Dirección del plano del club; barras a la distancia de tarjeta desde el centro del green",
+ "pin": {
+  "x": 157.5,
+  "y": 35.6
+ },
+ "green": [
+  [
+   169.8,
+   27.2
+  ],
+  [
+   167.2,
+   25.2
+  ],
+  [
+   163.5,
+   25.2
+  ],
+  [
+   159.0,
+   28.2
+  ],
+  [
+   154.2,
+   29.0
+  ],
+  [
+   154.0,
+   33.2
+  ],
+  [
+   153.0,
+   34.5
+  ],
+  [
+   148.2,
+   34.8
+  ],
+  [
+   144.8,
+   37.5
+  ],
+  [
+   143.8,
+   39.0
+  ],
+  [
+   144.2,
+   43.2
+  ],
+  [
+   146.2,
+   45.2
+  ],
+  [
+   154.2,
+   45.2
+  ],
+  [
+   155.0,
+   44.5
+  ],
+  [
+   155.0,
+   42.0
+  ],
+  [
+   153.2,
+   41.5
+  ],
+  [
+   153.2,
+   39.5
+  ],
+  [
+   156.8,
+   40.0
+  ],
+  [
+   157.2,
+   43.0
+  ],
+  [
+   160.5,
+   43.0
+  ],
+  [
+   163.2,
+   40.8
+  ],
+  [
+   163.2,
+   39.8
+  ],
+  [
+   166.2,
+   37.0
+  ],
+  [
+   167.0,
+   35.0
+  ],
+  [
+   168.2,
+   34.8
+  ],
+  [
+   168.2,
+   32.5
+  ],
+  [
+   170.0,
+   31.2
+  ]
+ ],
+ "green_source": "detectado en la ortofoto a 5 m de la posición del plano",
+ "fairways": [
+  [
+   [
+    130.9,
+    28.8
+   ],
+   [
+    147.8,
+    27.4
+   ],
+   [
+    149.3,
+    45.3
+   ],
+   [
+    132.4,
+    46.8
+   ]
+  ]
+ ],
+ "fairway_source": "aproximada: franja de ancho fijo a lo largo del hoyo",
+ "tree_scale": 1.3,
+ "water_keep": [
+  [
+   -21,
+   0
+  ]
+ ],
+ "course_utm": "contorno_campo.json"
+}

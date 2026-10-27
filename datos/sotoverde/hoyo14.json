@@ -1,0 +1,185 @@
+{
+ "id": "sotoverde-14",
+ "name": "Sotoverde",
+ "number": 14,
+ "par": 5,
+ "card": "Tarjeta: 444 m desde amarillas",
+ "geo": {
+  "crs": "EPSG:25830",
+  "origin": [
+   349512,
+   4609224
+  ],
+  "width": 375,
+  "height": 395,
+  "note": "origin = esquina superior izquierda en UTM 30N; x hacia el este, y hacia el sur, en metros"
+ },
+ "segmentation_roi": [
+  3,
+  3,
+  372,
+  392
+ ],
+ "tee": {
+  "x": 339.2,
+  "y": 35.3
+ },
+ "tees": {
+  "amarillas": {
+   "x": 339.2,
+   "y": 35.3,
+   "label": "Amarillas"
+  }
+ },
+ "teeBox": [
+  [
+   338.6,
+   29.4
+  ],
+  [
+   345.2,
+   35.5
+  ],
+  [
+   335.7,
+   45.7
+  ],
+  [
+   329.1,
+   39.6
+  ]
+ ],
+ "tee_source": "Dirección del plano del club; barras a la distancia de tarjeta desde el centro del green",
+ "pin": {
+  "x": 35.9,
+  "y": 359.6
+ },
+ "green": [
+  [
+   48.5,
+   359.2
+  ],
+  [
+   47.0,
+   358.0
+  ],
+  [
+   45.0,
+   352.0
+  ],
+  [
+   43.0,
+   351.2
+  ],
+  [
+   42.2,
+   349.5
+  ],
+  [
+   39.5,
+   349.5
+  ],
+  [
+   37.8,
+   350.5
+  ],
+  [
+   37.2,
+   353.2
+  ],
+  [
+   33.8,
+   353.8
+  ],
+  [
+   32.8,
+   355.0
+  ],
+  [
+   28.8,
+   355.5
+  ],
+  [
+   25.8,
+   357.0
+  ],
+  [
+   23.5,
+   359.0
+  ],
+  [
+   23.5,
+   361.8
+  ],
+  [
+   25.2,
+   365.8
+  ],
+  [
+   28.5,
+   367.5
+  ],
+  [
+   30.8,
+   367.5
+  ],
+  [
+   31.2,
+   368.8
+  ],
+  [
+   33.8,
+   368.8
+  ],
+  [
+   34.5,
+   367.2
+  ],
+  [
+   36.8,
+   365.8
+  ],
+  [
+   41.5,
+   365.5
+  ],
+  [
+   41.8,
+   362.2
+  ],
+  [
+   48.0,
+   362.2
+  ]
+ ],
+ "green_source": "detectado en la ortofoto a 5 m de la posición del plano",
+ "fairways": [
+  [
+   [
+    318.7,
+    77.8
+   ],
+   [
+    52.9,
+    361.9
+   ],
+   [
+    32.5,
+    342.7
+   ],
+   [
+    298.2,
+    58.6
+   ]
+  ]
+ ],
+ "fairway_source": "aproximada: franja de ancho fijo a lo largo del hoyo",
+ "tree_scale": 1.3,
+ "water_keep": [
+  [
+   57,
+   303
+  ]
+ ],
+ "course_utm": "contorno_campo.json"
+}
