@@ -9,3 +9,7 @@
 - Situación de los hoyos 4-18: plano del campo de la app del club (solo se guardan las coordenadas de las líneas
   tee → green, no la imagen).
 - Tarjeta (par y metros por hoyo): RFEG y golfsotoverde.com.
+- Recorrido 3D (`tools/campo_3d.py`): ortofoto PNOA del campo y alrededores (IGN, CC BY 4.0); plantas de edificios,
+  lagos y zona de la cancha de prácticas leídas por color de las teselas del mapa estándar de OpenStreetMap a zoom 18
+  (© colaboradores de OpenStreetMap, ODbL); árboles detectados en la ortofoto; puente y edificio de los puestos de
+  prácticas medidos sobre la ortofoto. Las alturas de los edificios son supuestas.

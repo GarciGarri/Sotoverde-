@@ -31,12 +31,17 @@ Son reglas de campo aproximadas, no un modelo balístico. En la página publicad
 guardan en la cuenta de cada persona; abierto en local, en el navegador. El botón GPS funciona donde el
 navegador da la ubicación (no dentro de claude.ai).
 
-**Conoce el campo**: en la portada, un recorrido 3D de unos 2 minutos generado en el navegador con three.js
-(se carga de cdnjs, con copia en `vendor/` por si falla). Usa el relieve real del MDT05 (exagerado ×1,6), una
-textura con los 18 hoyos, árboles y banderas; sobrevuela el campo y recorre cada hoyo del tee al green con su
-ficha: par, metros, hándicap, tipo de hoyo, desnivel, agua, búnkeres y un consejo. Todo sale de los datos de los
-hoyos salvo el hándicap (tarjeta del club) y el dog-leg del 6 (plano). Se puede pausar y saltar de hoyo.
-`tools/campo_3d.py` genera `js/campo3d.js` (malla de 5 m de todo el campo).
+**Conoce el campo**: en la portada, un recorrido 3D de unos 2,5 minutos generado en el navegador con three.js
+(se carga de cdnjs, con copia en `vendor/` por si falla). El terreno es la ortofoto PNOA (25 cm/px en el campo,
+1 m/px en los alrededores) sobre el relieve del MDT05 (exagerado ×1,3). Encima van los edificios en volumen
+(plantas de OpenStreetMap, con tejado de la ortofoto y tejado a cuatro aguas en las casas), la casa club, el
+edificio de los puestos de la cancha de prácticas, los cuatro lagos con su nivel del MDT, el puente, ~500 árboles
+con el color de su copa en la ortofoto, banderas y tees. Tras la introducción enseña las instalaciones (casa club,
+cancha de prácticas y puente, con datos calculados: hoyos cercanos, superficie y fondo de la cancha, largo del
+puente) y luego recorre cada hoyo del tee al green con su ficha: par, metros, hándicap, tipo de hoyo, desnivel,
+agua, búnkeres y un consejo. Se puede pausar y saltar de tramo.
+`tools/campo_3d.py` genera `js/campo3d.js`, las texturas de `img/` y `datos/sotoverde/campo3d_control.jpg`
+(control de lo extraído sobre la ortofoto). Alturas de los edificios supuestas (casas 5,6 m más tejado).
 
 **Modo juego** (`jugar.html`): los mismos hoyos al estilo Golf Clash.
 
@@ -163,6 +168,7 @@ js/holes.js                hoyos de ejemplo (inventados)
 js/campos.js               generado: hoyos reales de campos/*.json
 js/campo3d.js              generado: relieve de todo el campo para el recorrido 3D
 js/tour.js                 recorrido 3D de la portada (three.js)
+img/                       generado: ortofotos para el recorrido 3D
 vendor/three.min.js        three.js r128 (MIT), por si no carga la CDN
 campos/                    hoyos reales en JSON
 datos/sotoverde/           trazados manuales, imágenes de control y fuentes
