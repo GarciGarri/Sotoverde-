@@ -8,7 +8,14 @@ Vista del hoyo a pantalla completa. Para apuntar un golpe: toca el mapa donde qu
 bola provisional con el lie y la distancia; arrástrala (con lupa ×3) para afinarla y pulsa «Apuntar golpe».
 Mantener pulsado también abre la lupa. Pellizca o usa + / − para el zoom, arrastra el mapa para moverte,
 «Todo» enseña el hoyo entero y «Auto» vuelve al encuadre bola-green. En el green, «Putts / green» cambia el
-panel a putts y «Embocada · terminar».
+panel a putts y «Embocada · terminar». Mientras hay una bola provisional el panel se pliega y el mapa queda fijo.
+
+Modo **Trazar** (tracer): arrastra el dedo desde la bola dibujando el vuelo; se pinta con un trazo luminoso
+animado, se guarda simplificado y se clasifica la curva (recto, draw, fade, gancho, slice; para zurdos se
+invierte desde Mi bolsa). La tarjeta muestra el vuelo trazado más repetido por palo y Mi bolsa propone usarlo
+como vuelo habitual.
+
+La app se abre siempre en modo claro; el oscuro solo si se elige expresamente en el visor.
 
 **Mi bolsa**: cada palo con su distancia habitual, vuelo (recto, draw, fade, gancho, slice), altura de bola y
 fallo más repetido. En cada golpe recomienda palo y punto de mira según la distancia que juega el golpe:
