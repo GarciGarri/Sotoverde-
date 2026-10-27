@@ -401,12 +401,16 @@
     return prepared[key];
   }
 
-  // Vueltas importadas de tarjetas oficiales: solo el total de golpes por hoyo (hs.total), sin golpes en el mapa.
+  // Vueltas importadas de tarjetas oficiales: traen el total de golpes por hoyo (hs.total). Si se apuntan los
+  // golpes en el mapa, el total de la tarjeta vale hasta que el hoyo se termina; desde ahí mandan los golpes.
   const isImported = (r) => !!(r && r.source === 'tarjeta');
+  const liveStrokes = (hs) => (hs ? hs.entries.length + hs.putts : 0);
+  const usesTotal = (hs) => !!hs && hs.total != null && !(hs.done && liveStrokes(hs));
   function strokesOf(hs) {
     if (!hs) return 0;
-    return hs.entries.length + hs.putts || hs.total || 0;
+    return usesTotal(hs) ? hs.total : liveStrokes(hs);
   }
+  const scoreDone = (hs) => !!hs && (hs.done || hs.total != null);
   // Par del hoyo en esa vuelta (las pruebas de pitch & putt se juegan a par 54).
   const parOf = (r, n) => (r.pars && r.pars[n]) || byNumber[n].par;
 
@@ -432,9 +436,9 @@
     const h = holeData(n);
     const hs = holeScore(n);
     const pos = positions(n);
-    const strokes = strokesOf(hs);
+    const strokes = liveStrokes(hs);
     const par = parOf(round, n);
-    const card = isImported(round);
+    const card = usesTotal(hs);
     const shots = [];
     let firstGreen = null;
     hs.entries.forEach((e, i) => {
@@ -453,7 +457,8 @@
     const cur = pos[pos.length - 1];
     return {
       par, strokes, putts: card ? null : hs.putts, done: hs.done, fairway, gir, pens, shots,
-      toPin: GC.dist(cur, h.pin), lie: lastLie(n), started: strokes > 0,
+      cardStrokes: strokesOf(hs), cardDone: scoreDone(hs), detailed: strokes > 0,
+      toPin: GC.dist(cur, h.pin), lie: lastLie(n), started: strokesOf(hs) > 0,
     };
   }
 
@@ -475,7 +480,7 @@
       if (!k) continue;
       strokes += k;
       played++;
-      if (hs.done) {
+      if (scoreDone(hs)) {
         doneStrokes += k;
         par += parOf(r, n);
       }
@@ -723,11 +728,10 @@
   }
 
   function openHole(idx) {
-    if (isImported(round)) {
-      renderCard();
-      return;
-    }
     round.cur = idx;
+    // hoyo de una tarjeta importada sin golpes en el mapa: se abre para apuntarlos (cuenta el total mientras)
+    const hs0 = round.scores[round.holes[idx]];
+    if (hs0 && hs0.total != null && !liveStrokes(hs0)) hs0.done = false;
     Object.assign(ui, {
       editIndex: null, moveIndex: null, pendingDrop: false, cam: null, loupe: null, ghost: null,
       target: null, pickTarget: false, clubManual: false, more: false, putting: false,
@@ -1476,7 +1480,7 @@
     const t = totals();
     app.querySelector('#hole-id').innerHTML = `
       <div class="hv-num"><small>Hoyo</small>${n}</div>
-      <div class="hv-meta">Par ${raw.par} · ${h.length} m<span>${teeOk ? (TEES.find((x) => x[0] === round.tees) || [0, ''])[1] : 'Amarillas'} · ${idx + 1} de ${round.holes.length}</span></div>`;
+      <div class="hv-meta">Par ${st.par} · ${h.length} m<span>${teeOk ? (TEES.find((x) => x[0] === round.tees) || [0, ''])[1] : 'Amarillas'} · ${idx + 1} de ${round.holes.length}${hs.total != null ? ` · tarjeta ${hs.total}` : ''}</span></div>`;
     app.querySelector('#total').innerHTML = `<b class="${t.diff < 0 ? 'k-birdie' : t.diff > 0 ? 'k-double' : ''}">${t.played ? signed(t.diff) : 'E'}</b><span>${golpes(t.strokes)}</span>`;
     app.querySelector('#prev').disabled = idx === 0;
 
@@ -1638,6 +1642,14 @@
     };
     const finish = () => {
       hs.done = true;
+      if (hs.total != null) {
+        const k = liveStrokes(hs);
+        if (k !== hs.total) {
+          toast(`La tarjeta decía ${golpes(hs.total)}; el hoyo queda con ${k}.`);
+          hs.total = k;
+          round.edited = true;
+        }
+      }
       Object.assign(ui, { pendingDrop: false, ghost: null, putting: false });
       if (round.holes.every((m) => round.scores[m] && round.scores[m].done)) {
         round.finished = true;
@@ -1659,7 +1671,7 @@
     if ($s('#finish2')) $s('#finish2').onclick = finish;
     if ($s('#reopen')) $s('#reopen').onclick = () => {
       hs.done = false;
-      round.finished = false;
+      round.finished = isImported(round);
       ui.selectedClub = suggestClub(n);
       afterChange();
     };
@@ -1869,6 +1881,7 @@
   // Tarjetas importadas: se editan con el total de golpes de cada hoyo (no hay golpes en el mapa).
   let cardEdit = false;
   function setHoleTotal(n, d) {
+    if (liveStrokes(round.scores[n])) return; // con golpes en el mapa se edita en el mapa
     const cur = strokesOf(round.scores[n]);
     const next = cur ? cur + d : d > 0 ? parOf(round, n) : 0;
     if (next <= 0) delete round.scores[n];
@@ -1885,6 +1898,8 @@
     teardownMap();
     app.className = 'wrap';
     const card = isImported(round);
+    // columnas de putts, calle y green solo si hay golpes apuntados en el mapa
+    const cols = !card || round.holes.some((n) => liveStrokes(round.scores[n]));
     const t = totals();
     const rows = [];
     const sum = { par: 0, strokes: 0, putts: 0 };
@@ -1895,13 +1910,13 @@
     let girTot = 0;
     let pens = 0;
     let puttHoles = 0;
-    const subRow = (label, s) => `<tr class="sub"><td>${label}</td><td>${s.par}</td><td>${s.strokes || '–'}</td>${card ? '' : `<td>${s.putts || '–'}</td><td></td><td></td>`}</tr>`;
+    const subRow = (label, s) => `<tr class="sub"><td>${label}</td><td>${s.par}</td><td>${s.strokes || '–'}</td>${cols ? `<td>${s.putts || '–'}</td><td></td><td></td>` : ''}</tr>`;
     round.holes.forEach((n, i) => {
       const st = holeStats(n);
       const played = st.started;
       if (played) {
         section.par += st.par;
-        section.strokes += st.strokes;
+        section.strokes += st.cardStrokes;
         section.putts += st.putts || 0;
         if (st.fairway != null) { fwTot++; if (st.fairway) fwHit++; }
         if (st.done && st.gir != null) { girTot++; if (st.gir) girHit++; puttHoles++; }
@@ -1909,12 +1924,13 @@
       } else {
         section.par += st.par;
       }
-      const tint = st.done ? (st.strokes < st.par ? ' t-under' : st.strokes > st.par ? ' t-over' : '') : '';
+      const ks = st.cardStrokes;
+      const tint = st.cardDone ? (ks < st.par ? ' t-under' : ks > st.par ? ' t-over' : '') : '';
       rows.push(`<tr class="link${tint}" data-i="${i}"><td>${n}</td><td>${st.par}</td>
-        <td>${card && cardEdit
-          ? `<span class="stepper sm"><button data-h="${n}" data-d="-1" aria-label="Quitar un golpe en el hoyo ${n}">−</button><span class="val">${played ? mark(st.strokes, st.par) : '–'}</span><button data-h="${n}" data-d="1" aria-label="${played ? 'Añadir un golpe' : 'Poner resultado'} en el hoyo ${n}">+</button></span>`
-          : played ? mark(st.strokes, st.par) + (st.done ? '' : '<span class="muted">…</span>') : '–'}</td>
-        ${card ? '' : `<td>${played && st.putts != null ? st.putts : '–'}</td>
+        <td>${card && cardEdit && !st.detailed
+          ? `<span class="stepper sm"><button data-h="${n}" data-d="-1" aria-label="Quitar un golpe en el hoyo ${n}">−</button><span class="val">${played ? mark(ks, st.par) : '–'}</span><button data-h="${n}" data-d="1" aria-label="${played ? 'Añadir un golpe' : 'Poner resultado'} en el hoyo ${n}">+</button></span>`
+          : played ? mark(ks, st.par) + (st.cardDone ? '' : '<span class="muted">…</span>') + (card && cardEdit ? ' <span class="muted">en el mapa</span>' : '') : '–'}</td>
+        ${!cols ? '' : `<td>${played && st.putts != null ? st.putts : '–'}</td>
         <td>${st.fairway == null ? '<span class="muted">·</span>' : st.fairway ? '<span class="yes">✓</span>' : '<span class="no">✗</span>'}</td>
         <td>${!st.done || st.gir == null ? '<span class="muted">·</span>' : st.gir ? '<span class="yes">✓</span>' : '<span class="no">✗</span>'}</td>`}</tr>`);
       const endOfNine = n === 9 || i === round.holes.length - 1;
@@ -1944,8 +1960,8 @@
     for (const n of round.holes) {
       const st = holeStats(n);
       if (!st.started) continue;
-      if (st.strokes < st.par) better++;
-      if (st.strokes >= st.par + 2) worse++;
+      if (st.cardStrokes < st.par) better++;
+      if (st.cardStrokes >= st.par + 2) worse++;
     }
     const missing = round.holes.filter((n) => !holeStats(n).started).length;
     const stats = card ? `
@@ -1970,17 +1986,17 @@
         ${card ? `<button class="btn primary" id="edit-card">${cardEdit ? 'Hecho' : 'Editar golpes'}</button>` : `<button class="btn primary" id="resume">${round.finished ? 'Editar golpes' : 'Seguir apuntando'}</button>`}
       </div>
       <div class="table-scroll"><table class="score">
-        <thead><tr><th>Hoyo</th><th>Par</th><th>Golpes</th>${card ? '' : '<th>Putts</th><th>Calle</th><th>Green reg.</th>'}</tr></thead>
+        <thead><tr><th>Hoyo</th><th>Par</th><th>Golpes</th>${cols ? '<th>Putts</th><th>Calle</th><th>Green reg.</th>' : ''}</tr></thead>
         <tbody>${rows.join('')}</tbody></table></div>
       <p class="legend"><span><span class="mark birdie">3</span> birdie</span><span><span class="mark eagle">2</span> eagle o mejor</span>
         <span><span class="mark bogey">5</span> bogey</span><span><span class="mark double">6</span> doble o peor</span></p>
-      ${card ? `<p class="legend">${cardEdit ? 'Toca − o + en cada hoyo; con «−» por debajo de 1 el hoyo queda sin resultado. Se guarda al momento.' : `Importada de la tarjeta oficial${round.edited ? ' y editada por ti' : ''}: solo golpes por hoyo, sin putts, calles ni greens.`}${missing ? ` ${missing} hoyo${missing === 1 ? '' : 's'} sin resultado (–).` : ''}${round.pars ? ' Prueba de pitch & putt: todos los hoyos par 3.' : ''}</p>` : ''}
+      ${card ? `<p class="legend">${cardEdit ? 'Toca − o + en cada hoyo; con «−» por debajo de 1 el hoyo queda sin resultado. Se guarda al momento.' : `Importada de la tarjeta oficial${round.edited ? ' y editada por ti' : ''}. Toca un hoyo para apuntar en el mapa dónde acabó cada golpe y con qué palo.`}${missing ? ` ${missing} hoyo${missing === 1 ? '' : 's'} sin resultado (–).` : ''}${round.pars ? ' Prueba de pitch & putt: todos los hoyos par 3.' : ''}</p>` : ''}
 
       <h2 class="section-title">Estadísticas</h2>
       <div class="stats">${stats}
       </div>
 
-      ${card ? '' : '<h2 class="section-title">Distancias por palo</h2>'}
+      ${card && !clubRows ? '' : '<h2 class="section-title">Distancias por palo</h2>'}
       ${clubRows ? `<div class="table-scroll"><table class="score"><thead><tr><th>Palo</th><th>Golpes</th><th>Media</th><th>Máx.</th><th>Vuelo trazado</th></tr></thead><tbody>${clubRows}</tbody></table></div>
         <p class="legend">Distancia en línea recta de donde salió a donde quedó la bola (con rodada); no cuenta bolas al agua o fuera.</p>`
         : card ? '' : '<p class="empty">Apunta golpes en el mapa para ver tus distancias por palo.</p>'}
@@ -1995,6 +2011,8 @@
         e.stopPropagation();
         setHoleTotal(Number(b.dataset.h), Number(b.dataset.d));
       }));
+      if (cardEdit) return;
+      app.querySelectorAll('tr.link').forEach((tr) => (tr.onclick = () => openHole(Number(tr.dataset.i))));
       return;
     }
     app.querySelector('#resume').onclick = () => {
