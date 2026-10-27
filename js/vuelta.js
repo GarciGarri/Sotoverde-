@@ -170,6 +170,49 @@
   // ---------- almacenamiento ----------
 
   const LOCAL_KEY = 'sotoverde-vueltas';
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+
+  /*
+   * Guardado. Con cuenta: en la base de datos del artefacto, con una copia local de lo que aún no se ha
+   * podido guardar (sin cobertura en el campo) que se reintenta al volver la conexión. Sin cuenta: en este
+   * navegador. La base de datos no tiene transacciones (gana la última escritura), así que cada hoyo lleva
+   * su marca de tiempo (hs.ts) y antes de escribir se lee lo que hay y se fusiona hoyo a hoyo: lo apuntado
+   * en otro dispositivo no se pisa. Los comentarios se unen.
+   */
+  function mergeRounds(remote, local) {
+    const out = clone(local);
+    const cleared = { ...(remote.cleared || {}), ...(local.cleared || {}) };
+    for (const [n, t] of Object.entries(remote.cleared || {})) cleared[n] = Math.max(t, (local.cleared || {})[n] || 0);
+    const holes = new Set(Object.keys(remote.scores || {}).concat(Object.keys(local.scores || {})));
+    out.scores = {};
+    for (const n of holes) {
+      const a = (remote.scores || {})[n];
+      const b = (local.scores || {})[n];
+      let pick = !a ? b : !b ? a : (a.ts || 0) > (b.ts || 0) ? a : b;
+      if (pick && cleared[n] && cleared[n] > (pick.ts || 0)) pick = null;
+      if (pick) out.scores[n] = clone(pick);
+    }
+    if (Object.keys(cleared).length) out.cleared = cleared;
+    const seen = new Set();
+    out.chat = (remote.chat || []).concat(local.chat || []).filter((m) => {
+      const k = `${m.role}|${m.at}|${m.content}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).sort((x, y) => String(x.at).localeCompare(String(y.at))).slice(-60);
+    if (!out.chat.length) delete out.chat;
+    out.updatedAt = [remote.updatedAt, local.updatedAt].sort().pop();
+    return out;
+  }
+
+  // Cambia el contenido de una vuelta sin cambiar el objeto (la vista lo tiene referenciado).
+  function adopt(target, src) {
+    target.scores = src.scores;
+    if (src.chat) target.chat = src.chat;
+    if (src.cleared) target.cleared = src.cleared;
+    for (const k of ['finished', 'cur', 'cond', 'edited', 'updatedAt']) if (k in src) target[k] = src[k];
+  }
+
   const Store = {
     mode: 'local',
     db: null,
@@ -178,6 +221,9 @@
     timers: {},
     writing: {},
     dirty: {},
+    sigs: {},
+    pending: {},
+    retryTimer: null,
 
     async init() {
       try {
@@ -193,19 +239,70 @@
       } catch (e) {
         this.mode = 'local';
       }
+      if (this.mode === 'db') {
+        this.loadPending();
+        window.addEventListener('online', () => this.retry());
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) this.retry(); });
+      }
     },
     col() {
       return this.db.collection('data/users/' + this.uid);
     },
+    pendingKey() {
+      return LOCAL_KEY + '-pendiente-' + this.uid;
+    },
+    loadPending() {
+      try {
+        this.pending = JSON.parse(localStorage.getItem(this.pendingKey())) || {};
+      } catch (e) {
+        this.pending = {};
+      }
+    },
+    keepPending() {
+      try {
+        localStorage.setItem(this.pendingKey(), JSON.stringify(this.pending));
+      } catch (e) {
+        /* sin almacenamiento local: solo queda en memoria */
+      }
+    },
+    // Huella de cada hoyo tal como está guardado, para saber luego qué hoyos cambian.
+    remember(round) {
+      const sig = {};
+      for (const [n, hs] of Object.entries(round.scores || {})) sig[n] = JSON.stringify({ ...hs, ts: 0 });
+      this.sigs[round.id] = sig;
+    },
+    stamp(round) {
+      const now = Date.now();
+      const prev = this.sigs[round.id] || {};
+      for (const [n, hs] of Object.entries(round.scores || {})) {
+        const sig = JSON.stringify({ ...hs, ts: 0 });
+        if (prev[n] !== sig) hs.ts = now;
+      }
+      this.remember(round);
+    },
     async list() {
       if (this.mode === 'db') {
+        let list = [];
         try {
           const snap = await this.col().get();
-          return snap.docs.filter((d) => d.exists).map((d) => JSON.parse(JSON.stringify(d.data()))).filter(isRound);
+          list = snap.docs.filter((d) => d.exists).map((d) => clone(d.data())).filter(isRound);
         } catch (e) {
           toast('No se pudieron cargar tus vueltas. Vuelve a abrir la página en un momento.');
-          return [];
         }
+        // lo que quedó sin guardar (sin conexión) se fusiona y se vuelve a enviar
+        for (const [id, local] of Object.entries(this.pending)) {
+          if (!isRound(local)) continue;
+          const i = list.findIndex((r) => r.id === id);
+          if (i >= 0) list[i] = mergeRounds(list[i], local);
+          else list.push(local);
+        }
+        list.forEach((r) => this.remember(r));
+        Object.keys(this.pending).forEach((id) => {
+          const r = list.find((x) => x.id === id);
+          if (r) this.flush(r);
+        });
+        this.watch();
+        return list;
       }
       try {
         return (JSON.parse(localStorage.getItem(LOCAL_KEY)) || []).filter(isRound);
@@ -213,11 +310,50 @@
         return [];
       }
     },
+    // Cambios hechos en otro dispositivo, en directo.
+    watch() {
+      if (this.unwatch) return;
+      this.unwatch = this.col().onSnapshot((snap) => {
+        let changed = false;
+        for (const ch of snap.docChanges()) {
+          const id = ch.doc.id;
+          if (ch.doc.metadata.hasPendingWrites || this.writing[id] || this.pending[id] || this.timers[id]) continue;
+          if (ch.type === 'removed') {
+            if (rounds.some((r) => r.id === id) && round && round.id !== id) {
+              rounds = rounds.filter((r) => r.id !== id);
+              changed = true;
+            }
+            continue;
+          }
+          const data = ch.doc.data();
+          if (!isRound(data)) continue;
+          const mine = rounds.find((r) => r.id === id);
+          if (!mine) {
+            rounds.push(clone(data));
+            this.remember(data);
+            changed = true;
+          } else if (data.updatedAt !== mine.updatedAt) {
+            adopt(mine, mergeRounds(clone(data), mine));
+            this.remember(mine);
+            changed = true;
+          }
+        }
+        if (changed) refreshAfterSync();
+      }, () => { this.unwatch = null; });
+    },
     // Guarda con una pausa corta y nunca dos escrituras a la vez sobre la misma vuelta.
     save(round) {
       round.updatedAt = new Date().toISOString();
+      if (this.mode === 'db') {
+        this.stamp(round);
+        this.pending[round.id] = clone(round);
+        this.keepPending();
+      }
       clearTimeout(this.timers[round.id]);
-      this.timers[round.id] = setTimeout(() => this.flush(round), 600);
+      this.timers[round.id] = setTimeout(() => {
+        delete this.timers[round.id];
+        this.flush(round);
+      }, 600);
     },
     async flush(round) {
       if (this.mode !== 'db') {
@@ -237,7 +373,23 @@
       }
       this.writing[round.id] = true;
       try {
-        await this.col().doc(round.id).set(JSON.parse(JSON.stringify(round)));
+        const ref = this.col().doc(round.id);
+        const snap = await ref.get();
+        let body = clone(round);
+        if (snap.exists && isRound(snap.data())) {
+          body = mergeRounds(clone(snap.data()), body);
+          // lo que llegó de otro dispositivo pasa también a la vista
+          if (JSON.stringify(body.scores) !== JSON.stringify(round.scores) || (body.chat || []).length !== (round.chat || []).length) {
+            adopt(round, clone(body));
+            refreshAfterSync();
+          }
+        }
+        await ref.set(body);
+        this.remember(round);
+        if (!this.dirty[round.id] && !this.timers[round.id]) {
+          delete this.pending[round.id];
+          this.keepPending();
+        }
       } catch (e) {
         if (e && e.code === 'invalid_argument') {
           this.readOnly = true;
@@ -245,7 +397,8 @@
         } else if (e && e.code === 'quota_exceeded') {
           toast('El espacio para vueltas está lleno: borra alguna vuelta antigua.');
         } else {
-          toast('No se pudo guardar; se reintentará con el próximo cambio.');
+          toast('Sin conexión: la vuelta queda guardada en este móvil y se enviará al volver la cobertura.');
+          this.scheduleRetry();
         }
       } finally {
         this.writing[round.id] = false;
@@ -254,6 +407,22 @@
           this.flush(round);
         }
       }
+    },
+    scheduleRetry() {
+      if (this.retryTimer) return;
+      this.retryTimer = setTimeout(() => {
+        this.retryTimer = null;
+        this.retry();
+      }, 20000);
+    },
+    retry() {
+      for (const id of Object.keys(this.pending)) {
+        const r = rounds.find((x) => x.id === id);
+        if (r && !this.writing[id] && !this.timers[id]) this.flush(r);
+      }
+    },
+    pendingCount() {
+      return Object.keys(this.pending).length;
     },
     async loadBag() {
       try {
@@ -296,6 +465,10 @@
       }, 600);
     },
     async remove(id) {
+      if (this.pending[id]) {
+        delete this.pending[id];
+        this.keepPending();
+      }
       if (this.mode === 'db') {
         try {
           await this.col().doc(id).delete();
@@ -312,6 +485,19 @@
       }
     },
   };
+
+  // Tras recibir cambios de otro dispositivo: repintar lo que se esté viendo (sin tocar una bola a medio poner).
+  function refreshAfterSync() {
+    if (view === 'home') renderList();
+    else if (view === 'card' && !cardEdit) {
+      const y = window.scrollY;
+      renderCard();
+      window.scrollTo(0, y);
+    } else if (view === 'hole' && !ui.ghost && canvas) {
+      renderHoleUi();
+      drawMap();
+    }
+  }
 
   // Solo documentos con forma de vuelta (la colección podría tener otros).
   function isRound(r) {
@@ -392,6 +578,17 @@
       out[c] = { top, cnt, total };
     }
     return out;
+  }
+
+  // Ejecuta fn con otra vuelta como activa (positions, holeStats… leen `round`) y la restaura pase lo que pase.
+  function withRound(r, fn) {
+    const saved = round;
+    round = r;
+    try {
+      return fn();
+    } finally {
+      round = saved;
+    }
   }
 
   const prepared = {};
@@ -495,16 +692,13 @@
       for (const n of r.holes) {
         const hs = r.scores && r.scores[n];
         if (!hs || !byNumber[n]) continue;
-        const saved = round;
-        round = r;
-        const pos = positions(n);
+        const pos = withRound(r, () => positions(n));
         hs.entries.forEach((e, i) => {
           if (e.t !== 's' || !e.c || e.l === 'water' || e.l === 'ob') return;
           const d = GC.dist(pos[i], pos[i + 1]);
           if (d < 5) return;
           (acc[e.c] = acc[e.c] || []).push(d);
         });
-        round = saved;
       }
     }
     return acc;
@@ -587,7 +781,7 @@
       </header>
       <p class="storage-note">${storage}</p>
 
-      ${GC.Tour && GC.COURSE_3D ? `<h2 class="section-title">Conoce el campo <small>Recorrido 3D hoyo a hoyo</small></h2>
+      ${GC.Tour ? `<h2 class="section-title">Conoce el campo <small>Recorrido 3D hoyo a hoyo</small></h2>
       <div class="tour" id="tour"></div>` : ''}
 
       <h2 class="section-title">Nueva vuelta</h2>
@@ -675,7 +869,7 @@
       const t = totals(r);
       const route = ROUTES.find((x) => x[0] === r.route);
       const tee = TEES.find((x) => x[0] === r.tees);
-      const r3d = t.played && GC.Tour && GC.COURSE_3D
+      const r3d = t.played && GC.Tour
         ? `<button class="r3d" data-act="3d" aria-label="Ver el resumen 3D de la vuelta del ${esc(fmtDate(r.date))}"><span class="play3d" aria-hidden="true"></span>3D</button>` : '';
       return `<div class="round-row${r3d ? ' has-3d' : ''}" data-id="${esc(r.id)}">${r3d}
         <div class="score num${t.diff < 0 ? ' under' : ''}">${t.played ? t.strokes : '–'}<small>${t.played ? signed(t.diff) : '·'}</small></div>
@@ -1519,7 +1713,7 @@
     const pos = positions(n);
     if (hs.done) {
       action = `<div class="action"><button class="btn" id="reopen">Reabrir</button>
-        ${GC.Tour && GC.COURSE_3D ? '<button class="btn" id="hole3d">Ver en 3D</button>' : ''}
+        ${GC.Tour ? '<button class="btn" id="hole3d">Ver en 3D</button>' : ''}
         <button class="btn primary" id="next2"><span>${idx < round.holes.length - 1 ? 'Siguiente hoyo' : 'Ver tarjeta'}<small>${GC.scoreName(st.strokes, st.par)} · ${golpes(st.strokes)}</small></span></button></div>`;
     } else if (ui.ghost) {
       const from = ui.moveIndex != null ? pos[ui.moveIndex] : pos[pos.length - 1];
@@ -1901,6 +2095,27 @@
     window.scrollTo(0, y);
   }
 
+  /*
+   * Stableford de una vuelta importada. Sin cambios, el oficial. Si se han editado golpes, se recalcula con
+   * los golpes de hándicap que recibió en cada hoyo (official.rec, sacados de los puntos oficiales por hoyo;
+   * si faltan, repartiendo el hándicap de juego por el hándicap de cada hoyo).
+   */
+  function stablefordOf(r) {
+    const o = r.official || {};
+    if (o.stableford == null) return { points: null, note: 'sin dato oficial' };
+    if (!r.edited || o.playingHcp == null) return { points: o.stableford, note: 'puntos oficiales' };
+    const SI = GC.STROKE_INDEX || {};
+    const h = o.playingHcp;
+    let pts = 0;
+    for (const n of r.holes) {
+      const k = strokesOf(r.scores[n]);
+      if (!k) continue;
+      const rec = o.rec && o.rec[n] != null ? o.rec[n] : Math.floor(h / 18) + ((SI[n] || 18) <= h % 18 ? 1 : 0);
+      pts += Math.max(0, 2 + parOf(r, n) + rec - k);
+    }
+    return { points: pts, note: pts === o.stableford ? 'como el oficial' : `con tus cambios · oficial ${o.stableford}` };
+  }
+
   function renderCard() {
     view = 'card';
     teardownMap();
@@ -1909,7 +2124,7 @@
     const card = isImported(round);
     // columnas de putts, calle y green solo si hay golpes apuntados en el mapa
     const cols = !card || round.holes.some((n) => liveStrokes(round.scores[n]));
-    const has3d = !!(GC.Tour && GC.COURSE_3D);
+    const has3d = !!(GC.Tour);
     const t = totals();
     const rows = [];
     const sum = { par: 0, strokes: 0, putts: 0 };
@@ -1974,8 +2189,9 @@
       if (st.cardStrokes >= st.par + 2) worse++;
     }
     const missing = round.holes.filter((n) => !holeStats(n).started).length;
+    const stb = stablefordOf(round);
     const stats = card ? `
-        <div class="stat"><div class="k">Stableford</div><div class="v num">${official.stableford ?? '–'}</div><div class="s">puntos oficiales</div></div>
+        <div class="stat"><div class="k">Stableford</div><div class="v num">${stb.points ?? '–'}</div><div class="s">${stb.note}</div></div>
         <div class="stat"><div class="k">Hándicap de juego</div><div class="v num">${official.playingHcp ?? '–'}</div><div class="s">${official.index != null ? `índice ${String(official.index).replace('.', ',')}` : 'en esta prueba'}</div></div>
         <div class="stat"><div class="k">Birdies o mejor</div><div class="v num">${better}</div><div class="s">hoyos bajo par</div></div>
         <div class="stat"><div class="k">Dobles o peor</div><div class="v num">${worse}</div><div class="s">hoyos +2 o más</div></div>`
@@ -2136,9 +2352,7 @@
 
   // Resumen de la vuelta (o de un hoyo) para el visor 3D.
   function replayData(r, only) {
-    const saved = round;
-    round = r;
-    try {
+    return withRound(r, () => {
       const holes = r.holes.filter((n) => only == null || n === only).map(replayHole).filter(Boolean);
       if (only != null) return { holes };
       const t = totals(r);
@@ -2170,9 +2384,7 @@
         outro: { eyebrow: 'Final de la vuelta', title: `${golpes(t.strokes)} · ${signed(t.diff)}`, line: esc(fmtDate(r.date)), chips, tip },
         holes,
       };
-    } finally {
-      round = saved;
-    }
+    });
   }
 
   // Último comentario del jugador sobre un hoyo (para la ficha final del hoyo en el resumen).
@@ -2423,7 +2635,8 @@ ${brief}`;
   });
 
   window.__vuelta = {
-    get round() { return round; }, get store() { return Store; }, toUtm30, tapMap: (p) => tapMap(p),
+    get round() { return round; }, get rounds() { return rounds; }, get store() { return Store; }, toUtm30, tapMap: (p) => tapMap(p),
+    mergeRounds, stablefordOf,
     teeScreen: () => { const pos = positions(currentN()); return GC.worldToScreen(cam, mapView, pos[pos.length - 1]); },
     pinScreen: () => GC.worldToScreen(cam, mapView, holeData(currentN()).pin),
   };

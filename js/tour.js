@@ -29,11 +29,48 @@
 
   // ---------- datos del campo en coordenadas del recorrido (metros, x este, y sur desde la esquina NO) ----------
 
+  // Los datos 3D (js/campo3d.js, ~350 KB) solo se descargan al reproducir; hasta entonces basta con los hoyos.
+  const ORIGIN = [349080, 4609290]; // esquina NO del campo (UTM 30N), la misma que usa tools/campo_3d.py
+  const POSTER = 'img/campo_poster.jpg';
+  const DATA_URL = 'js/campo3d.js';
+  let dataPromise = null;
+  function loadCourse() {
+    if (GC.COURSE_3D) return Promise.resolve(GC.COURSE_3D);
+    if (!dataPromise) {
+      dataPromise = new Promise((ok, ko) => {
+        const s = document.createElement('script');
+        s.src = DATA_URL;
+        s.onload = () => (GC.COURSE_3D ? ok(GC.COURSE_3D) : ko(new Error('sin datos 3D')));
+        s.onerror = () => {
+          dataPromise = null;
+          ko(new Error('sin datos 3D'));
+        };
+        document.head.appendChild(s);
+      });
+    }
+    return dataPromise;
+  }
+
+  let holesCache = null;
+  function holesModel() {
+    if (holesCache) return holesCache;
+    const [X0, Y1] = ORIGIN;
+    const holes = (GC.COURSE_HOLES || []).slice().sort((a, b) => a.number - b.number).map((raw) => {
+      const h = GC.prepareHole(raw, 'amarillas');
+      const ox = raw.geo.origin[0] - X0;
+      const oy = Y1 - raw.geo.origin[1];
+      const to = (p) => ({ x: p.x + ox, y: p.y + oy });
+      return { raw, h, ox, oy, to, tee: to(h.tee), pin: to(h.pin), info: holeInfo(raw, h) };
+    });
+    holesCache = { C: null, holes, club: [] };
+    return holesCache;
+  }
+
   let modelCache = null;
   function courseModel() {
     if (modelCache) return modelCache;
     const C = GC.COURSE_3D;
-    const [X0, Y1] = C.origin;
+    if (C.origin[0] !== ORIGIN[0] || C.origin[1] !== ORIGIN[1]) throw new Error('campo3d.js no coincide con ORIGIN');
     const D = C.dem;
     const heights = D.dm.map((v) => D.base + v / 10);
     const heightAt = (x, y) => {
@@ -46,13 +83,7 @@
       const at = (a, b) => heights[b * D.cols + a];
       return at(i, j) * (1 - u) * (1 - v) + at(i + 1, j) * u * (1 - v) + at(i, j + 1) * (1 - u) * v + at(i + 1, j + 1) * u * v;
     };
-    const holes = (GC.COURSE_HOLES || []).slice().sort((a, b) => a.number - b.number).map((raw) => {
-      const h = GC.prepareHole(raw, 'amarillas');
-      const ox = raw.geo.origin[0] - X0;
-      const oy = Y1 - raw.geo.origin[1];
-      const to = (p) => ({ x: p.x + ox, y: p.y + oy });
-      return { raw, h, ox, oy, to, tee: to(h.tee), pin: to(h.pin), info: holeInfo(raw, h) };
-    });
+    const { holes } = holesModel();
     const model = { C, heightAt, holes, base: Math.min(...heights), width: C.size[0], depth: C.size[1] };
     model.club = clubStops(model);
     modelCache = model;
@@ -217,9 +248,9 @@
 
   // ---------- reproductor ----------
 
-  function segments(model) {
+  function segments(model, clubStopsCount = model.club.length) {
     const segs = [{ kind: 'intro', dur: DUR.intro, label: 'I', title: 'Introducción' }];
-    if (model.club.length) segs.push({ kind: 'club', dur: DUR.club * model.club.length, label: 'C', title: 'Instalaciones' });
+    if (clubStopsCount) segs.push({ kind: 'club', dur: DUR.club * clubStopsCount, label: 'C', title: 'Instalaciones' });
     model.holes.forEach((ho, i) => segs.push({ kind: 'hole', i, dur: DUR.hole, label: String(ho.raw.number), title: `Hoyo ${ho.raw.number}` }));
     segs.push({ kind: 'outro', dur: DUR.outro, label: 'F', title: 'Final' });
     let t = 0;
@@ -231,18 +262,19 @@
   }
 
   function mount(container, opts = {}) {
-    const model = courseModel();
-    const { segs, duration } = segments(model);
+    const model = GC.COURSE_3D ? courseModel() : holesModel();
+    const { segs, duration } = segments(model, model.C ? model.club.length : 3); // 3 instalaciones hasta tener los datos
     return makePlayer(container, model, segs, duration, {
       ...opts, button: 'Recorrido 3D', sub: `${Math.round(duration / 60)} min · 18 hoyos`, first: intro(model),
+      resegment: (m) => segments(m),
     });
   }
 
   function makePlayer(container, model, segs, duration, opts) {
     const player = {
       container, model, segs, duration, playing: false, t: 0, onEnd: opts.onEnd, data: opts.data || null, onSegment: opts.onSegment || null,
+      resegment: opts.resegment || null,
     };
-    const bar = segs.filter((s) => s.kind !== 'outro' && s.kind !== 'routro');
     container.innerHTML = `
       <canvas class="tour-poster" aria-hidden="true"></canvas>
       <div class="tour-gl"></div>
@@ -253,17 +285,23 @@
         <button class="tb" data-a="prev" aria-label="Tramo anterior">‹‹</button>
         <button class="tb" data-a="toggle" aria-label="Pausa">❚❚</button>
         <button class="tb" data-a="next" aria-label="Tramo siguiente">››</button>
-        <div class="tour-prog" role="slider" aria-label="Progreso del recorrido" aria-valuemin="0" aria-valuemax="100">${
-          bar.map((s, i) => `<span data-seg="${i}" class="k-${s.kind}" title="${s.title}"><i></i></span>`).join('')}</div>
+        <div class="tour-prog" role="slider" aria-label="Progreso del recorrido" aria-valuemin="0" aria-valuemax="100"></div>
       </div>`;
     drawPoster(player);
     container.querySelector('.tour-play').onclick = () => start(player);
     container.querySelectorAll('.tour-bar .tb').forEach((b) => (b.onclick = () => action(player, b.dataset.a)));
-    container.querySelectorAll('.tour-prog span').forEach((s) => (s.onclick = () => seekSeg(player, Number(s.dataset.seg))));
+    drawBar(player);
     caption(player, opts.first);
     bindSwipe(player);
     if (opts.autoplay) start(player);
     return player;
+  }
+
+  function drawBar(player) {
+    const prog = player.container.querySelector('.tour-prog');
+    prog.innerHTML = player.segs.filter((s) => s.kind !== 'outro' && s.kind !== 'routro')
+      .map((s, i) => `<span data-seg="${i}" class="k-${s.kind}" title="${s.title}"><i></i></span>`).join('');
+    prog.querySelectorAll('span').forEach((s) => (s.onclick = () => seekSeg(player, Number(s.dataset.seg))));
   }
 
   // Deslizar a izquierda o derecha pasa al tramo (hoyo) siguiente o anterior; también las flechas del teclado.
@@ -328,12 +366,12 @@
     const par = model.holes.reduce((a, ho) => a + ho.info.par, 0);
     const p3 = model.holes.filter((ho) => ho.info.par === 3).length;
     const p4 = model.holes.filter((ho) => ho.info.par === 4).length;
-    const lakes = model.C.water.length;
+    const lakes = model.C ? model.C.water.length : 0;
     return {
       eyebrow: 'Golf Sotoverde · Arroyo de la Encomienda',
       title: 'El campo',
       line: `${model.holes.length} hoyos · par ${par} · ${meters.toLocaleString('es-ES')} m desde amarillas`,
-      chips: [`${p3} pares 3`, `${p4} pares 4`, `${model.holes.length - p3 - p4} par 5`, `${lakes} lagos`, 'Cancha de prácticas'],
+      chips: [`${p3} pares 3`, `${p4} pares 4`, `${model.holes.length - p3 - p4} par 5`].concat(lakes ? [`${lakes} lagos`] : [], ['Cancha de prácticas']),
       tip: 'Un recorrido corto y técnico: aquí manda la precisión con los hierros.',
     };
   }
@@ -351,7 +389,7 @@
       const s = Math.max(cv.width / img.width, cv.height / img.height) * 1.08;
       ctx.drawImage(img, (cv.width - img.width * s) / 2, (cv.height - img.height * s) / 2, img.width * s, img.height * s);
     };
-    img.src = player.model.C.tex.poster;
+    img.src = POSTER;
   }
 
   function loadTexture(THREE, url) {
@@ -362,7 +400,14 @@
     const c = player.container;
     c.classList.add('loading');
     try {
-      const THREE = await loadThree();
+      const [THREE] = await Promise.all([loadThree(), loadCourse()]);
+      if (!player.model.C) {
+        player.model = courseModel();
+        if (player.resegment) {
+          Object.assign(player, player.resegment(player.model));
+          drawBar(player);
+        }
+      }
       if (!player.three) {
         const [course, around] = await Promise.all([
           loadTexture(THREE, player.model.C.tex.course), loadTexture(THREE, player.model.C.tex.around)]);
@@ -1061,7 +1106,7 @@
    *   from, to, path?, lie?, cap }] }] } con los puntos en metros del hoyo (como en campos/*.json).
    */
   function replay(container, data, opts = {}) {
-    const model = courseModel();
+    const model = GC.COURSE_3D ? courseModel() : holesModel();
     const segs = [];
     const holes = [];
     data.holes.forEach((hd) => {
@@ -1269,5 +1314,6 @@
     render(player);
   }
 
+  GC.STROKE_INDEX = STROKE_INDEX;
   GC.Tour = { mount, replay, dispose, pause, holeInfo, courseModel, lieIconUrl };
 })(typeof window !== 'undefined' ? window : globalThis);

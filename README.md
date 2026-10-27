@@ -27,6 +27,12 @@ fallo más repetido. En cada golpe recomienda palo y punto de mira según la dis
 desnivel real del MDT (1 m de subida ≈ 1 m más), viento (+0,62 %/km/h de cara, −0,31 %/km/h a favor; ×1,3 con
 bola alta y ×0,7 con bola baja), temperatura (−0,2 %/°C sobre la de referencia) y deriva por viento cruzado
 y por el vuelo habitual; avisa si el fallo habitual acaba en agua, búnker o fuera de límites.
+**Guardado**: con cuenta, cada cambio se guarda en la base de datos del artefacto y, mientras no se confirma, también en
+el móvil (`localStorage`), así que sin cobertura en el campo no se pierde nada: se reenvía al volver la conexión o al
+reabrir la página. Cada hoyo lleva su marca de tiempo y al guardar se fusiona hoyo a hoyo con lo que haya en la cuenta,
+de modo que apuntar desde dos dispositivos no se pisa; los cambios de otro dispositivo llegan en directo. En las tarjetas
+importadas, si se editan golpes, el Stableford se recalcula con los golpes de hándicap de cada hoyo de esa prueba.
+
 Son reglas de campo aproximadas, no un modelo balístico. En la página publicada las vueltas se
 guardan en la cuenta de cada persona; abierto en local, en el navegador. El botón GPS funciona donde el
 navegador da la ubicación (no dentro de claude.ai).
@@ -187,7 +193,8 @@ vendor/three.min.js        three.js r128 (MIT), por si no carga la CDN
 campos/                    hoyos reales en JSON
 datos/sotoverde/           trazados manuales, imágenes de control y fuentes
 tools/                     scripts de extracción (Python)
-tests/check-holes.js       comprobaciones (node)
+tests/check-holes.js       comprobaciones de los hoyos (node)
+tests/e2e.js               pruebas de la app en navegador (Playwright): anotar, guardar sin conexión, fusión, tarjetas, 3D
 ```
 
 Ortofoto PNOA y MDT05 © Instituto Geográfico Nacional, licencia CC BY 4.0.
