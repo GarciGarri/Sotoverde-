@@ -118,8 +118,10 @@ def point_in_poly(pts, x, y):
     return inside
 
 
-def excluded(poly, points, radius=6):
+def excluded(poly, points, radius=6, rects=()):
     cx, cy = centroid(poly)
+    if any(x0 <= cx <= x1 and y0 <= cy <= y1 for x0, y0, x1, y1 in rects):
+        return True
     return any(point_in_poly(poly, x, y) or np.hypot(cx - x, cy - y) < radius for x, y in points)
 
 
@@ -201,7 +203,8 @@ def main(cfg_path):
     crop = ortho(cfg, cache_dir)
     auto = seg.segment(crop, *cfg["segmentation_roi"])
     ex = cfg.get("exclude_points", [])
-    bunkers = [p for p in auto["bunkers"] if not excluded(p, ex)] + cfg.get("extra_bunkers", [])
+    rects = cfg.get("exclude_rects", [])  # zonas sin búnkeres ni agua reales (edificios, jardines)
+    bunkers = [p for p in auto["bunkers"] if not excluded(p, ex, rects=rects)] + cfg.get("extra_bunkers", [])
     water = [p for p in auto["water"] if not excluded(p, ex)] + cfg.get("extra_water", [])
     green = cfg["green"]
     tees = [cfg["tee"]] + list(cfg.get("tees", {}).values())

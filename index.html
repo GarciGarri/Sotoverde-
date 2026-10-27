@@ -13,7 +13,7 @@
 
     <div class="toolbar">
       <a class="btn primary" id="play-selected" href="#">Jugar seleccionados</a>
-      <a class="btn" href="juego.html?hoyos=campo">Jugar todos</a>
+      <a class="btn" id="play-course" href="juego.html?hoyos=campo">Ronda del campo (amarillas)</a>
     </div>
 
     <h2>Campo de Sotoverde</h2>
@@ -93,9 +93,13 @@
         list.forEach((h) => box.appendChild(card(h, opts)));
       }
 
-      fill('course', GC.COURSE_HOLES || [], null, 'Todavía no hay hoyos del campo.');
+      fill('course', (GC.COURSE_HOLES || []).slice().sort((a, b) => a.number - b.number), null, 'Todavía no hay hoyos del campo.');
       fill('examples', GC.EXAMPLE_HOLES, null, '');
       fill('mine', GC.store.list(), { removable: true }, 'Aún no has guardado hoyos propios.');
+
+      const course = (GC.COURSE_HOLES || []).slice().sort((a, b) => a.number - b.number);
+      document.getElementById('play-course').href =
+        'juego.html?salida=amarillas&hoyos=' + encodeURIComponent(course.map((h) => h.id).join(','));
 
       document.getElementById('play-selected').addEventListener('click', (e) => {
         e.preventDefault();

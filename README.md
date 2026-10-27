@@ -1,7 +1,7 @@
 # Sotoverde Clash
 
 Hoyos de golf reales en vista cenital, al estilo **Golf Clash**, hechos con HTML5 Canvas y JavaScript sin dependencias.
-El primer hoyo replicado es el **hoyo 3 del campo de Golf Sotoverde** (Arroyo de la Encomienda, Valladolid).
+Hoyos replicados del campo de **Golf Sotoverde** (Arroyo de la Encomienda, Valladolid): **1, 2 y 3**.
 
 ## Jugar
 
@@ -53,8 +53,10 @@ python3 tools/crear_hoyo.py datos/sotoverde/hoyo03.json
 node tests/check-holes.js
 ```
 
-Para otro hoyo: copia `hoyo03.json`, cambia `geo.origin`/tamaño, el tee (por ejemplo, con un marcador de Google Earth
-pasado a UTM), la bandera, el green y la calle, y vuelve a ejecutar el script. Revisa la imagen de control.
+Para otro hoyo: copia `hoyo01.json`/`hoyo03.json`, cambia `geo.origin`/tamaño, el tee (por ejemplo, con un marcador de Google Earth
+pasado a UTM), la bandera, el green y la calle, y vuelve a ejecutar el script. Revisa la imagen de control: si la detección por color confunde
+arboledas con agua o edificios con búnkeres, corrígelo con `exclude_points`, `exclude_rects`, `extra_trees`
+o `extra_bunkers`.
 
 ### Limitaciones conocidas
 
