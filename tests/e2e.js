@@ -103,6 +103,14 @@ function mockClaude({ withDb, withSample }) {
       if (name === 'db') return withDb ? { collection: col, doc: (k) => ref(k) } : null;
       if (name === 'user') return withDb ? { id: async () => 'u_prueba' } : null;
       if (name === 'sample') return withSample ? sample : null;
+      if (name === 'mcp' && withSample) {
+        return {
+          callTool: async (server, tool, input) => {
+            window.__mock.mcp = { server, tool, input };
+            return { content: [], payload: { currentConditions: { temperatureValue: 8.4, now: '1:00', phrase: 'Despejado', extended: { wind: 'ONO 14 km/h', windValue: 14 } } } };
+          },
+        };
+      }
       return null;
     },
   };
@@ -177,6 +185,20 @@ async function main() {
       return ui && ui.ghost ? { club: ui.selectedClub, lie: window.__vuelta.lieAt(ui.ghost) } : null;
     });
     check(g && g.club === 'h7' && g.lie === 'rough', `la IA coloca la bola y el palo (${JSON.stringify(g)})`);
+    check(p.errors.length === 0, 'sin errores');
+    await p.context().close();
+  }
+
+  console.log('Tiempo real');
+  {
+    const p = await page({ withSample: true });
+    await p.waitForSelector('[data-c="f-live"]');
+    await p.click('[data-c="f-live"]');
+    await p.waitForTimeout(400);
+    const temp = await p.locator('.cond-grid .stepper .val').first().textContent();
+    const wind = await p.locator('.cond-grid .stepper .val').nth(1).textContent();
+    const dir = await p.locator('[data-c="f-from"][aria-pressed="true"]').textContent();
+    check(temp === '8°' && wind === '14' && dir === 'NO', `rellena temperatura, viento y dirección (${temp}, ${wind}, ${dir})`);
     check(p.errors.length === 0, 'sin errores');
     await p.context().close();
   }

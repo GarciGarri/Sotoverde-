@@ -605,3 +605,5 @@ table.score tr.t-over td { background: rgba(200, 50, 42, 0.06); }
 .tour-tools .tt[aria-pressed="true"] { background: var(--lime); color: #10301d; }
 .tour.free-cam .tour-gl { cursor: grab; touch-action: none; }
 .tour.free-cam .tour-cap { opacity: 0.35; }
+.field.live { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; grid-column: 1 / -1; }
+.field.live .muted { font-size: 12.5px; }

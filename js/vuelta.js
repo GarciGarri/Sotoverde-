@@ -744,8 +744,34 @@
       <div class="field"><label>Viento</label>
         <span class="stepper"><button data-c="${prefix}wind-" aria-label="Menos viento">−</button><span class="val">${c.wind}</span><button data-c="${prefix}wind+" aria-label="Más viento">+</button></span>
         <span class="stepper-label">km/h</span></div>
+      ${weatherReady ? `<div class="field live"><button type="button" class="btn small" data-c="${prefix}live">Tiempo real (AccuWeather)</button>
+        <span class="muted">${c.src ? esc(c.src) : 'Rellena temperatura y viento con el tiempo de ahora en Arroyo de la Encomienda'}</span></div>` : ''}
       <div class="field"><label>Viento del… (de dónde sopla)</label>
         <div class="seg">${WIND_DIRS.map(([k, d]) => `<button data-c="${prefix}from" data-d="${d}" aria-pressed="${c.from === d}">${k}</button>`).join('')}</div></div>`;
+  }
+
+  // Tiempo real con el conector de AccuWeather del visitante (en la página publicada, si lo tiene conectado).
+  const WEATHER = { server: 'AccuWeather', tool: 'widgets-current-claude', locationKey: '1467268' }; // Arroyo de la Encomienda
+  const COMPASS = { N: 0, NNE: 22.5, NE: 45, ENE: 67.5, E: 90, ESE: 112.5, SE: 135, SSE: 157.5, S: 180, SSO: 202.5, SO: 225, OSO: 247.5, O: 270, ONO: 292.5, NO: 315, NNO: 337.5 };
+  let weatherReady = false;
+  let mcpApi = null;
+  async function liveWeather() {
+    try {
+      const res = await mcpApi.callTool(WEATHER.server, WEATHER.tool, { queryParams: { locationKey: WEATHER.locationKey, unit: 'metric', lang: 'es' } });
+      const cc = res && res.payload && res.payload.currentConditions;
+      if (!cc || !Number.isFinite(cc.temperatureValue)) throw new Error('sin datos');
+      const ext = cc.extended || {};
+      const letters = String(ext.wind || '').trim().split(/\s+/)[0].toUpperCase().replace(/W/g, 'O');
+      const deg = COMPASS[letters];
+      const w = { temp: Math.round(cc.temperatureValue), wind: Math.round(Number(ext.windValue) || 0) };
+      if (deg != null) w.from = (Math.round(deg / 45) * 45) % 360;
+      w.src = `AccuWeather ${cc.now || ''}: ${Math.round(cc.temperatureValue)} °C, ${cc.phrase || ''}${ext.wind ? `, viento ${ext.wind}` : ''}`.replace(/\s+/g, ' ');
+      toast(w.src);
+      return w;
+    } catch (e) {
+      toast(e && e.code === 'server_not_connected' ? 'Conecta AccuWeather en claude.ai (Ajustes → Conectores) para usar el tiempo real.' : 'No se pudo consultar el tiempo ahora.');
+      return null;
+    }
   }
 
   function bindCond(root, c, prefix, onChange) {
@@ -757,6 +783,16 @@
         if (k === 'wind-') c.wind = Math.max(0, c.wind - 2);
         if (k === 'wind+') c.wind = Math.min(80, c.wind + 2);
         if (k === 'from') c.from = Number(b.dataset.d);
+        if (k === 'live') {
+          b.disabled = true;
+          b.textContent = 'Consultando…';
+          liveWeather().then((w) => {
+            if (w) Object.assign(c, w);
+            onChange();
+          });
+          return;
+        }
+        if (k !== 'live') delete c.src;
         onChange();
       };
     });
@@ -3232,6 +3268,11 @@ ${brief}`;
   let listLoaded = false;
   renderHome();
   getSample().then((f) => { aiReady = !!f; });
+  (window.claude && window.claude.use ? window.claude.use('mcp').catch(() => null) : Promise.resolve(null)).then((m) => {
+    mcpApi = m;
+    weatherReady = !!m;
+    if (weatherReady && view === 'home') renderHome();
+  });
   Store.init().then(async () => {
     const savedBag = await Store.loadBag();
     if (savedBag && savedBag.clubs) {

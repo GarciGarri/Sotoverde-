@@ -33,6 +33,10 @@ superficie y lo deja como bola provisional para ajustar y confirmar. Con el micr
 En **Mi bolsa**, el fallo más repetido se mide con los golpes del mapa (lado al que se desvían más de 8 m) y en
 **Mi progreso** se ven los putts según la distancia del primer putt (bola apuntada en el green).
 
+**Tiempo real**: en la página publicada, si tienes conectado AccuWeather en claude.ai, «Tiempo real (AccuWeather)»
+rellena temperatura, viento y dirección con el tiempo actual de Arroyo de la Encomienda (al empezar la vuelta o
+dentro de un hoyo, en «Más»). Pide permiso la primera vez.
+
 **Guardado**: con cuenta, cada cambio se guarda en la base de datos del artefacto y, mientras no se confirma, también en
 el móvil (`localStorage`), así que sin cobertura en el campo no se pierde nada: se reenvía al volver la conexión o al
 reabrir la página. Cada hoyo lleva su marca de tiempo y al guardar se fusiona hoyo a hoyo con lo que haya en la cuenta,
