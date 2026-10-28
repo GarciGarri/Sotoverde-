@@ -2854,6 +2854,8 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
 
   // ---------- resumen en 3D ----------
 
+  // Altura máxima del vuelo (m) por palo en golpes completos, valores típicos de aficionado.
+  const APEX = { dr: 27, m3: 24, m5: 24, hi: 23, h4: 22, h5: 22, h6: 23, h7: 24, h8: 25, h9: 26, pw: 26, gw: 24, sw: 22, lw: 20 };
   const LIE_FROM = { tee: 'Desde el tee', fairway: 'Desde la calle', rough: 'Desde el rough', sand: 'Desde el búnker',
     green: 'Desde el green', water: 'Desde el agua', ob: 'Desde fuera' };
   const LIE_TO = { tee: 'al tee', fairway: 'a la calle', rough: 'al rough', sand: 'al búnker', green: 'al green',
@@ -2888,8 +2890,17 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
         if (e.l === 'water' || e.l === 'ob') tip = 'Penalización: un golpe más y a dropar.';
         else if (holed) tip = '¡Embocada desde fuera del green!';
         else if (e.l === 'green' && k <= par - 2) tip = 'Green en regulación.';
+        // altura del vuelo según el palo (media de amateur) y la parte de su distancia habitual que hizo
+        const cfg = bagClub(e.c);
+        const full = cfg && cfg.dist ? d / cfg.dist : 1;
+        let apex = (APEX[e.c] || 24) * GC.clamp(full, 0.35, 1.1) * (cfg.height === 'alta' ? 1.15 : cfg.height === 'baja' ? 0.85 : 1);
+        if (d < 35) apex = Math.min(apex, Math.max(1.5, d * 0.3));
+        // sin trazo dibujado, la curva de su vuelo habitual (metros a la derecha en el punto medio)
+        const shape = e.f || cfg.shape || 'recto';
+        const bow = e.p ? 0 : -(SHAPE_CURVE[shape] || 0) * d * 1.2 * (bag.hand === 'zurdo' ? -1 : 1);
         steps.push({
-          kind: 'shot', from: A, to: B, path: e.p || null, lie: e.l,
+          kind: 'shot', from: A, to: B, path: e.p || null, lie: e.l, apex, bow,
+          label: `${clubName(e.c)} · ${Math.round(d)} m`,
           cap: {
             eyebrow: `Hoyo ${n} · golpe ${k}`,
             title: `${clubName(e.c)} · ${Math.round(d)} m`,
@@ -2902,7 +2913,7 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
         const dropped = e.x != null;
         lie = dropped ? detectLie(h, B.x, B.y) : lie;
         steps.push({
-          kind: 'drop', from: A, to: B, lie,
+          kind: 'drop', from: A, to: B, lie, label: dropped ? 'Drop' : '+1',
           cap: {
             eyebrow: `Hoyo ${n} · golpe ${k}`, title: 'Penalización', lie: dropped ? { k: lie, name: `Drop en ${lieName(lie).toLowerCase()}` } : null,
             line: `+1 golpe${dropped ? ` · drop en ${lieName(lie).toLowerCase()} a ${Math.round(GC.dist(B, h.pin))} m de la bandera` : ''}`,
@@ -2914,7 +2925,7 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
     if (hs.putts) {
       const L = pos[pos.length - 1];
       steps.push({
-        kind: 'putts', from: L, to: h.pin, lie: 'green',
+        kind: 'putts', from: L, to: h.pin, lie: 'green', label: `${hs.putts} putt${hs.putts === 1 ? '' : 's'} · ${Math.round(GC.dist(L, h.pin))} m`,
         cap: {
           eyebrow: `Hoyo ${n} · en el green`,
           title: `${hs.putts} putt${hs.putts === 1 ? '' : 's'}`, lie: { k: 'green', name: 'Green' },

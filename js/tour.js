@@ -272,7 +272,7 @@
   }
 
   function makePlayer(container, model, segs, duration, opts) {
-    const player = {
+    const player = container.__player = {
       container, model, segs, duration, playing: false, t: 0, onEnd: opts.onEnd, data: opts.data || null, onSegment: opts.onSegment || null,
       resegment: opts.resegment || null,
     };
@@ -288,9 +288,9 @@
         <button class="tt" data-t="shot">Guardar imagen</button>
       </div>` : ''}
       <div class="tour-bar" hidden>
-        <button class="tb" data-a="prev" aria-label="Tramo anterior">‹‹</button>
+        <button class="tb" data-a="prev" aria-label="${opts.data ? 'Golpe anterior' : 'Tramo anterior'}">‹‹</button>
         <button class="tb" data-a="toggle" aria-label="Pausa">❚❚</button>
-        <button class="tb" data-a="next" aria-label="Tramo siguiente">››</button>
+        <button class="tb" data-a="next" aria-label="${opts.data ? 'Golpe siguiente' : 'Tramo siguiente'}">››</button>
         <div class="tour-prog" role="slider" aria-label="Progreso del recorrido" aria-valuemin="0" aria-valuemax="100"></div>
       </div>`;
     if (!opts.data) {
@@ -374,6 +374,32 @@
     void c.offsetWidth;
     c.classList.add(dir > 0 ? 'swipe-l' : 'swipe-r');
     seekSeg(player, to);
+  }
+
+  // En los resúmenes, ‹‹ y ›› van de golpe en golpe (deslizar sigue cambiando de hoyo).
+  function stepShot(player, dir) {
+    const { seg, s } = segmentAt(player, player.t);
+    if (s.kind !== 'play') {
+      seekSeg(player, seg + dir);
+      return;
+    }
+    const { j } = stepAt(s, player.t - s.t0);
+    const lt = player.t - s.t0 - s.steps[j].t0;
+    // atrás: al principio de este golpe si ya va avanzado, si no al anterior
+    const to = dir > 0 ? j + 1 : lt > 0.8 ? j : j - 1;
+    if (to < 0) seekSeg(player, seg - 1);
+    else if (to >= s.steps.length) seekSeg(player, seg + 1);
+    else {
+      player.t = s.t0 + s.steps[to].t0 + 0.001;
+      player.camPos = null;
+      player.container.classList.remove('ended', 'paused');
+      if (!player.playing) {
+        player.playing = true;
+        player.last = performance.now();
+        player.container.classList.add('playing');
+        loop(player);
+      }
+    }
   }
 
   // Herramientas del resumen: otras vueltas, cámara libre e imagen.
@@ -784,7 +810,7 @@
       const flag = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 2.4), flagMat);
       flag.position.copy(base).add(new THREE.Vector3(1.8, 7.8, 0));
       const label = textSprite(THREE, String(ho.raw.number), { round: true });
-      label.position.copy(base).add(new THREE.Vector3(0, 15, 0));
+      label.position.copy(base).add(new THREE.Vector3(0, 10, 0));
       const tee = new THREE.Mesh(new THREE.SphereGeometry(0.9, 10, 8), teeMat);
       tee.position.copy(W(ho.tee.x, ho.tee.y, 0.9));
       scene.add(pole, flag, label, tee);
@@ -792,7 +818,7 @@
     }
     for (const p of C.pois) {
       const sp = textSprite(THREE, p.name, {});
-      sp.position.copy(W(p.x, p.y, p.h + 8));
+      sp.position.copy(W(p.x, p.y, p.h + 3));
       scene.add(sp);
       labels.pois.push(sp);
     }
@@ -800,7 +826,7 @@
     const ro = new ResizeObserver(() => resize(player));
     player.three = { renderer, scene, camera, labels, water: waterMat, ro };
     if (player.data) {
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.6, 14, 10), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 10), new THREE.MeshBasicMaterial({ color: 0xffffff }));
       ball.visible = false;
       scene.add(ball);
       player.three.ball = ball;
@@ -899,9 +925,11 @@
     g.fillText(text, w / 2, round ? 68 : 40);
     const tex = new THREE.CanvasTexture(c);
     tex.encoding = THREE.sRGBEncoding;
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-    const k = round ? (size || 7) / 128 : 6.5 / 76;
-    sp.scale.set(c.width * k, c.height * k, 1);
+    // tamaño fijo en pantalla: legible de lejos y sin taparlo todo de cerca
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, sizeAttenuation: false }));
+    const h = round ? (size ? size * 0.008 : 0.05) : 0.042;
+    sp.scale.set((h * c.width) / c.height, h, 1);
+    sp.center.set(0.5, 0);
     sp.renderOrder = 10;
     return sp;
   }
@@ -1068,6 +1096,7 @@
       camera.position.copy(player.camPos);
       camera.lookAt(player.camLook);
     }
+    if (player.data) keepBadgesInside(player);
     renderer.render(scene, camera);
     updateUi(player, s.seg, s.sub);
   }
@@ -1173,7 +1202,8 @@
         player.container.classList.replace('playing', 'paused');
         render(player);
       } else start(player);
-    } else if (a === 'next') seekSeg(player, seg + 1);
+    } else if (player.data && (a === 'next' || a === 'prev')) stepShot(player, a === 'next' ? 1 : -1);
+    else if (a === 'next') seekSeg(player, seg + 1);
     else if (a === 'prev') seekSeg(player, seg - 1);
   }
 
@@ -1357,9 +1387,91 @@
     return sp;
   }
 
+  /*
+   * Etiqueta de un golpe con tamaño constante en pantalla (se lee igual de cerca que de lejos): icono del lie,
+   * número del golpe y, en la versión completa, «PW · 41 m». Se apoya sobre su punto (center 0.5, 0).
+   */
+  function badgeSprite(THREE, { lie, n, text }) {
+    const c = document.createElement('canvas');
+    const g = c.getContext('2d');
+    const H = 96;
+    const font = "800 46px 'Barlow Condensed', 'Arial Narrow', sans-serif";
+    g.font = font;
+    const tw = text ? Math.ceil(g.measureText(text).width) + 26 : 0;
+    const W = 8 + 80 + 6 + 46 + (text ? tw : 8) + 8;
+    c.width = W;
+    c.height = H + 18;
+    g.font = font;
+    // píldora con piquito hacia el punto
+    const r = H / 2;
+    g.fillStyle = 'rgba(255,255,255,0.96)';
+    g.strokeStyle = 'rgba(15,58,36,0.9)';
+    g.lineWidth = 4;
+    g.beginPath();
+    g.moveTo(r, 2);
+    g.lineTo(W - r, 2);
+    g.arc(W - r, r, r - 2, -Math.PI / 2, Math.PI / 2);
+    g.lineTo(W / 2 + 12, H - 2);
+    g.lineTo(W / 2, H + 14);
+    g.lineTo(W / 2 - 12, H - 2);
+    g.lineTo(r, H - 2);
+    g.arc(r, r, r - 2, Math.PI / 2, -Math.PI / 2);
+    g.closePath();
+    g.fill();
+    g.stroke();
+    drawLieIcon(g, lie, 8, 8, 80);
+    g.fillStyle = '#0f3a24';
+    g.beginPath();
+    g.arc(8 + 80 + 6 + 23, r, 23, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#ffffff';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = "800 34px 'Barlow Condensed', 'Arial Narrow', sans-serif";
+    g.fillText(String(n), 8 + 80 + 6 + 23, r + 2);
+    if (text) {
+      g.fillStyle = '#0f3a24';
+      g.textAlign = 'left';
+      g.font = font;
+      g.fillText(text, 8 + 80 + 6 + 46 + 12, r + 3);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+    tex.anisotropy = 4;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, sizeAttenuation: false }));
+    const h = 0.075; // ~9 % del alto de la pantalla
+    sp.scale.set((h * c.width) / c.height, h, 1);
+    sp.center.set(0.5, 0);
+    sp.renderOrder = 12;
+    return sp;
+  }
+
+  // Punto de la bola de tamaño constante (se ve aunque la cámara esté lejos).
+  function ballDot(THREE) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    g.fillStyle = 'rgba(0,0,0,0.35)';
+    g.beginPath();
+    g.arc(32, 32, 30, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#ffffff';
+    g.beginPath();
+    g.arc(32, 32, 20, 0, Math.PI * 2);
+    g.fill();
+    const tex = new THREE.CanvasTexture(c);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, sizeAttenuation: false }));
+    sp.scale.set(0.024, 0.024, 1);
+    sp.renderOrder = 13;
+    return sp;
+  }
+
   // ---------- repetición de una vuelta o de un hoyo, con los golpes dibujados ----------
 
-  const RP = { rintro: 5.5, approach: 2.4, shot: 3.2, drop: 2.2, putts: 2.8, end: 3, card: 5, routro: 5.5 };
+  const RP = { rintro: 5.5, approach: 2.4, shot: 4.2, drop: 2.4, putts: 3.2, end: 3.2, card: 5, routro: 5.5 };
+  // Fases de un golpe (fracción del tramo): preparación detrás de la bola, vuelo y plano final del golpe entero.
+  const PRE = 0.12;
+  const FLY_END = 0.6;
   const LIE_COLOR = { fairway: 0xffffff, rough: 0xf0d77a, sand: 0xf6e7b6, green: 0xb9f58f, water: 0x4aa8e8, ob: 0xff5a45, tee: 0xffffff };
 
   /*
@@ -1421,15 +1533,23 @@
         plan.push({ x: pts[j].x + (pts[j + 1].x - pts[j].x) * f, y: pts[j].y + (pts[j + 1].y - pts[j].y) * f });
       }
     } else {
-      plan = Array.from({ length: n }, (_, i) => ({ x: st.A.x + ((st.B.x - st.A.x) * i) / (n - 1), y: st.A.y + ((st.B.y - st.A.y) * i) / (n - 1) }));
+      // sin trazo: recta con la curva del vuelo habitual (st.bow, metros a la derecha en el punto medio)
+      const d0 = GC.dist(st.A, st.B) || 1;
+      const rx = -(st.B.y - st.A.y) / d0;
+      const ry = (st.B.x - st.A.x) / d0;
+      plan = Array.from({ length: n }, (_, i) => {
+        const t = i / (n - 1);
+        const b = (st.bow || 0) * Math.sin(Math.PI * t);
+        return { x: st.A.x + (st.B.x - st.A.x) * t + rx * b, y: st.A.y + (st.B.y - st.A.y) * t + ry * b };
+      });
     }
     const d = GC.dist(st.A, st.B);
-    const apex = putt ? 0 : d < 35 ? Math.max(1.5, d * 0.22) : Math.min(34, 6 + d * 0.13);
+    const apex = putt ? 0 : st.apex != null ? st.apex : d < 35 ? Math.max(1.5, d * 0.22) : Math.min(34, 6 + d * 0.13);
     const ya = W(st.A.x, st.A.y).y;
     const yb = W(st.B.x, st.B.y).y;
     return plan.map((p, i) => {
       const t = i / (n - 1);
-      const tt = t < 0.6 ? (t / 0.6) * 0.5 : 0.5 + ((t - 0.6) / 0.4) * 0.5; // el vértice, algo pasada la mitad
+      const tt = t < 0.58 ? (t / 0.58) * 0.5 : 0.5 + ((t - 0.58) / 0.42) * 0.5; // el vértice, algo pasada la mitad
       const ground = W(p.x, p.y).y;
       const y = putt ? ground + 0.25 : Math.max(ground + 0.3, ya + (yb - ya) * t + apex * Math.sin(Math.PI * tt));
       return new THREE.Vector3(W(p.x, p.y).x, y, W(p.x, p.y).z);
@@ -1448,11 +1568,27 @@
       if (st.kind !== 'putts') k++;
       const putt = st.kind === 'putts';
       const pts = st.kind === 'drop' ? [player.W(st.A.x, st.A.y, 0.4), player.W(st.B.x, st.B.y, 0.4)] : flightCurve(player, st, putt);
-      const it = { pts, tubes: [], marker: null };
+      const it = { pts, tubes: [], marker: null, full: null, mini: null, shadow: null };
+      if (st.kind !== 'putts' && GC.dist(st.A, st.B) > 0.5) {
+        // sombra de la trayectoria en el suelo (discontinua): ayuda a leer hacia dónde fue
+        const ground = pts.map((p) => new THREE.Vector3(p.x, 0, p.z)).map((p) => {
+          const wx = p.x + player.model.width / 2;
+          const wz = p.z + player.model.depth / 2;
+          return new THREE.Vector3(p.x, (player.model.heightAt(wx, wz) - player.model.base) * EXAG + 0.25, p.z);
+        });
+        const geo = new THREE.BufferGeometry().setFromPoints(ground);
+        const line = new THREE.Line(geo, new THREE.LineDashedMaterial({ color: 0x0b1f12, dashSize: 1.6, gapSize: 1.1, transparent: true, opacity: 0.55, depthWrite: false }));
+        line.computeLineDistances();
+        line.renderOrder = 4;
+        it.shadow = line;
+        group.add(line);
+      }
       if (st.kind !== 'drop' && GC.dist(st.A, st.B) > 0.5) {
         const curve = new THREE.CatmullRomCurve3(pts);
         const color = putt ? 0xffffff : st.lie === 'water' || st.lie === 'ob' ? 0xff6b55 : 0xfff1a6;
-        for (const [r, op] of putt ? [[0.14, 0.95]] : [[0.32, 0.95], [0.9, 0.22]]) {
+        const dd = GC.dist(st.A, st.B);
+        const core = putt ? 0.06 : GC.clamp(dd * 0.0022, 0.07, 0.3);
+        for (const [r, op] of putt ? [[core, 0.95]] : [[core, 0.95], [core * 2.6, 0.16]]) {
           const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 96, r, 6, false),
             new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, depthWrite: false }));
           tube.renderOrder = 5;
@@ -1460,16 +1596,23 @@
           group.add(tube);
         }
       }
-      if (!putt) {
+      {
         const end = player.W(st.B.x, st.B.y, 0.25);
-        const ring = new THREE.Mesh(new THREE.RingGeometry(1.1, 1.8, 24), new THREE.MeshBasicMaterial({
+        const rs = GC.clamp(GC.dist(st.A, st.B) * 0.012, 0.25, 1);
+        const ring = new THREE.Mesh(new THREE.RingGeometry(0.9 * rs, 1.5 * rs, 24), new THREE.MeshBasicMaterial({
           color: LIE_COLOR[st.lie] || 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthWrite: false }));
         ring.rotation.x = -Math.PI / 2;
         ring.position.copy(end);
-        const num = lieSprite(THREE, st.lie, k);
-        num.position.copy(end).add(new THREE.Vector3(0, 4.6, 0));
+        const top = end.clone().add(new THREE.Vector3(0, Math.max(0.8, 3 * rs), 0));
+        const stem = new THREE.Line(new THREE.BufferGeometry().setFromPoints([end, top]), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }));
+        const num = putt ? 'P' : String(k);
+        it.full = badgeSprite(THREE, { lie: putt ? 'green' : st.lie, n: num, text: st.label || '' });
+        it.mini = badgeSprite(THREE, { lie: putt ? 'green' : st.lie, n: num, text: '' });
+        it.full.position.copy(top);
+        it.mini.position.copy(top);
+        it.mini.scale.multiplyScalar(0.8);
         it.marker = new THREE.Group();
-        it.marker.add(ring, num);
+        it.marker.add(ring, stem, it.full, it.mini);
         group.add(it.marker);
       }
       return it;
@@ -1503,38 +1646,78 @@
     return { j, st: s.steps[j], k: GC.clamp((lt - s.steps[j].t0) / s.steps[j].dur, 0, 1) };
   }
 
-  const FLIGHT = 0.55; // parte del tramo en la que vuela la bola; el resto queda a la vista
+  // Las etiquetas cerca del borde se desplazan hacia dentro (el palito sigue marcando el punto).
+  function keepBadgesInside(player) {
+    const THREE = global.THREE;
+    const { camera, groups } = player.three;
+    const g = groups.get(segmentAt(player, player.t).seg);
+    if (!g) return;
+    const v = new THREE.Vector3();
+    camera.updateMatrixWorld();
+    for (const it of g.items) {
+      if (!it || !it.marker || !it.marker.visible) continue;
+      for (const sp of [it.full, it.mini]) {
+        if (!sp.visible) continue;
+        v.copy(sp.position).project(camera);
+        const halfW = sp.scale.x / 2 / (Math.tan((camera.fov * Math.PI) / 360) * camera.aspect); // medio ancho en coordenadas normalizadas
+        const over = Math.max(0, v.x + halfW - 0.97) - Math.max(0, -0.97 - (v.x - halfW));
+        sp.center.x = GC.clamp(0.5 + over / (2 * halfW || 1), 0.06, 0.94);
+      }
+    }
+  }
+
+  // Avance del vuelo (0-1) dentro del tramo de un golpe.
+  const flyK = (st, k) => (st.kind === 'drop' ? GC.clamp(k / 0.5, 0, 1) : GC.clamp((k - PRE) / (FLY_END - PRE), 0, 1));
 
   function drawReplay(player, sh) {
+    const THREE = global.THREE;
     const { groups, ball } = player.three;
+    if (!player.three.dot) {
+      player.three.dot = ballDot(THREE);
+      player.three.scene.add(player.three.dot);
+    }
+    const dot = player.three.dot;
     const s = player.segs[sh.seg];
     groups.forEach((g, key) => (g.group.visible = key === sh.seg));
     if (s.kind !== 'play') {
-      ball.visible = false;
+      ball.visible = dot.visible = false;
       return;
     }
     const g = replayGroup(player, sh.seg);
     g.group.visible = true;
     g.others.visible = !!player.showOthers;
     const { j, k } = stepAt(s, player.t - s.t0);
+    // la etiqueta completa: la del golpe en curso (o la del último al ver el hoyo entero)
+    const lastShot = s.steps.reduce((a, st, i) => (g.items[i] && i <= j ? i : a), -1);
     s.steps.forEach((st, i) => {
       const it = g.items[i];
       if (!it) return;
-      const f = i < j ? 1 : i > j ? 0 : GC.clamp(k / FLIGHT, 0, 1);
-      it.tubes.forEach((tube) => {
+      const f = i < j ? 1 : i > j ? 0 : flyK(st, k);
+      const dim = i < j && s.steps[j].kind !== 'end' ? 0.3 : 1; // los golpes ya vistos, más tenues
+      it.tubes.forEach((tube, ti) => {
         const n = tube.geometry.index.count;
         tube.geometry.setDrawRange(0, Math.floor((n * f) / 36) * 36);
-        tube.visible = f > 0;
+        tube.visible = f > 0 && !(ti > 0 && dim < 1);
+        tube.material.opacity = (ti ? 0.16 : 0.95) * dim;
       });
-      if (it.marker) it.marker.visible = f >= 1;
+      if (it.shadow) {
+        it.shadow.geometry.setDrawRange(0, Math.max(2, Math.floor(it.pts.length * f)));
+        it.shadow.visible = f > 0;
+      }
+      if (it.marker) {
+        it.marker.visible = f >= 1;
+        const full = i === lastShot && s.steps[j].kind !== 'end'; // en la vista del hoyo entero, solo las compactas
+        it.full.visible = full;
+        it.mini.visible = !full;
+      }
     });
     // la bola: volando en el golpe actual; si no, donde quedó el último golpe (o en el tee)
     const cur = s.steps[j];
     const it = g.items[j];
     let ballPos = null;
-    if (it && cur.kind === 'drop') ballPos = k < FLIGHT / 2 ? it.pts[0] : it.pts[1];
+    if (it && cur.kind === 'drop') ballPos = k < 0.25 ? it.pts[0] : it.pts[1];
     else if (it) {
-      const q = GC.clamp(k / FLIGHT, 0, 1) * (it.pts.length - 1);
+      const q = flyK(cur, k) * (it.pts.length - 1);
       const a = Math.floor(q);
       ballPos = it.pts[a].clone().lerp(it.pts[Math.min(it.pts.length - 1, a + 1)], q - a);
     } else {
@@ -1543,8 +1726,13 @@
       const p = prev ? prev.B : first ? first.A : null;
       if (p) ballPos = player.W(p.x, p.y, 0.6);
     }
-    ball.visible = !!ballPos && !(s.steps[j].kind === 'end' && s.hd.holed);
-    if (ballPos) ball.position.copy(ballPos);
+    const show = !!ballPos && !(cur.kind === 'end' && s.hd.holed);
+    ball.visible = dot.visible = show;
+    if (ballPos) {
+      ball.position.copy(ballPos);
+      dot.position.copy(ballPos);
+    }
+    player.ballPos = ballPos;
   }
 
   function replayCam(player, seg, s, lt) {
@@ -1552,22 +1740,46 @@
     const { j, st, k } = stepAt(s, lt);
     const ho = s.ho;
     if (st.kind === 'shot' || st.kind === 'drop' || st.kind === 'putts') {
+      const THREE = global.THREE;
       const A = st.A;
       const B = st.kind === 'drop' && GC.dist(st.A, st.B) < 1 ? ho.pin : st.B;
       const d = Math.max(8, GC.dist(A, B));
       const u = { x: (B.x - A.x) / d, y: (B.y - A.y) / d };
-      const e = ease(GC.clamp(k / FLIGHT, 0, 1));
-      const back = st.kind === 'putts' ? 24 + d : Math.max(22, d * 0.42);
-      const lift = st.kind === 'putts' ? 14 : 9 + d * 0.2;
-      const side = d * 0.08;
-      const pos = W(A.x - u.x * back - u.y * side, A.y - u.y * back + u.x * side, lift);
-      const lf = 0.35 + 0.65 * e;
-      // lo que debe verse: salida, llegada, el vértice del vuelo y la marca del lie encima de la bola
+      const r = { x: -u.y, y: u.x };
       const it = player.three && player.three.groups && player.three.groups.get(seg) ? player.three.groups.get(seg).items[j] : null;
-      const fit = [W(A.x, A.y, 1), W(st.B.x, st.B.y, 1), W(st.B.x, st.B.y, 7)];
-      if (it && it.pts.length > 2) fit.push(it.pts[Math.floor(it.pts.length * 0.55)]);
-      if (st.kind === 'putts') fit.push(W(ho.pin.x, ho.pin.y, 9));
-      return { pos, look: W(A.x + (B.x - A.x) * lf, A.y + (B.y - A.y) * lf, 2), seg, sub: j, fit };
+      const apex = it && it.pts.length > 2 ? it.pts.reduce((a, p) => (p.y > a.y ? p : a), it.pts[0]) : W((A.x + B.x) / 2, (A.y + B.y) / 2, 4);
+      const endFit = [W(A.x, A.y, 1), W(st.B.x, st.B.y, 1), W(st.B.x, st.B.y, 9), apex];
+      if (st.kind === 'putts') endFit.push(W(ho.pin.x, ho.pin.y, 4));
+      // 1) detrás de la bola, bajo, mirando hacia donde va
+      const back = st.kind === 'putts' ? 14 + d * 0.8 : 16 + d * 0.18;
+      const low = st.kind === 'putts' ? 8 + d * 0.2 : 9 + d * 0.1;
+      const camA = W(A.x - u.x * back, A.y - u.y * back, low);
+      const lookA = W(A.x + u.x * Math.min(d, 60) * 0.5, A.y + u.y * Math.min(d, 60) * 0.5, 2);
+      // 3) plano final: desde un lado y algo atrás, alto, con el golpe entero a la vista
+      const side = (st.bow || 0) > 0 ? -1 : 1;
+      const mid = { x: (A.x + B.x) / 2, y: (A.y + B.y) / 2 };
+      const dc = Math.max(d, 18);
+      const camC = W(mid.x - u.x * dc * 0.55 + r.x * side * dc * 0.45, mid.y - u.y * dc * 0.55 + r.y * side * dc * 0.45, 8 + dc * 0.35);
+      const lookC = W(mid.x + u.x * d * 0.12, mid.y + u.y * d * 0.12, 2);
+      if (st.kind === 'putts' || st.kind === 'drop') {
+        // putts y drops: desde un lado y en alto, con la bola y su destino en el mismo plano
+        const pd = Math.max(d, st.kind === 'drop' ? 14 : 3);
+        const pos = W(A.x - u.x * pd * 0.9 + r.x * pd * 1.6, A.y - u.y * pd * 0.9 + r.y * pd * 1.6, 6 + pd * 1.2);
+        const to = st.kind === 'drop' ? st.B : ho.pin;
+        return { pos, look: W((A.x + to.x) / 2, (A.y + to.y) / 2, 0.5), seg, sub: j, fit: endFit, maxPull: 3 };
+      }
+      if (k < PRE) return { pos: camA, look: lookA, seg, sub: j, fit: [W(A.x, A.y, 1)], maxPull: 2 };
+      if (k < FLY_END && st.kind !== 'drop') {
+        // 2) en vuelo: la cámara sube hacia el plano final y sigue a la bola
+        const e = ease((k - PRE) / (FLY_END - PRE));
+        const pos = camA.clone().lerp(camC, e * 0.85);
+        const ballP = player.ballPos ? player.ballPos.clone() : lookA;
+        const look = ballP.lerp(lookC, 0.25 + 0.35 * e);
+        return { pos, look, seg, sub: j, fit: [player.ballPos ? player.ballPos.clone() : lookA, W(st.B.x, st.B.y, 1)], maxPull: 3 };
+      }
+      const e = ease(GC.clamp((k - FLY_END) / (1 - FLY_END), 0, 1));
+      const pos = camA.clone().lerp(camC, 0.85 + 0.15 * e);
+      return { pos, look: lookC, seg, sub: j, fit: endFit };
     }
     // presentación y cierre del hoyo: vista de todo el hoyo desde detrás del tee
     const L = GC.dist(ho.tee, ho.pin) || 1;
@@ -1602,5 +1814,13 @@
   }
 
   GC.STROKE_INDEX = STROKE_INDEX;
-  GC.Tour = { mount, replay, dispose, pause, holeInfo, courseModel, lieIconUrl };
+  // Ir a un instante concreto y dibujarlo (pruebas y capturas).
+  function seek(player, t) {
+    player.t = GC.clamp(t, 0, player.duration);
+    player.camPos = null;
+    render(player);
+    render(player); // la cámara usa la posición de la bola del fotograma anterior
+  }
+
+  GC.Tour = { mount, replay, dispose, pause, seek, holeInfo, courseModel, lieIconUrl };
 })(typeof window !== 'undefined' ? window : globalThis);
