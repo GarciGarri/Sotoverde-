@@ -69,7 +69,8 @@ hoyo; la vuelta empieza y acaba con el resumen (golpes, resultado al par, pares,
 Los hoyos de tarjetas importadas sin golpes en el mapa se enseñan con su resultado. Deslizando a izquierda o derecha
 (o con las flechas del teclado) se pasa al hoyo siguiente o anterior.
 En el visor: **Otras vueltas** superpone en azul los golpes de ese hoyo en tus otras vueltas, **Cámara libre** permite
-girar (arrastrar) y acercar (rueda o pellizco), y **Guardar imagen** descarga el fotograma con su ficha (PNG).
+girar (arrastrar) y acercar (rueda o pellizco), **Guardar imagen** descarga el fotograma con su ficha (PNG)
+y **Pantalla completa** (o la tecla F) lo amplía a toda la pantalla sin el panel de comentarios; Escape vuelve.
 Junto al visor hay un panel de **comentarios con IA**: lo que escribes se guarda en la vuelta marcado con el hoyo
 que estabas viendo (el vídeo se pausa al escribir) y vuelve a salir en la ficha final de ese hoyo. En la página
 publicada, Claude responde como entrenador con los datos de la vuelta (golpes explicados, resultado, bolsa) y de todo tu historial

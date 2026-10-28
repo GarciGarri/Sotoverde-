@@ -596,7 +596,7 @@ table.score tr.t-over td { background: rgba(200, 50, 42, 0.06); }
 .dictate .muted { flex-basis: 100%; font-size: 12.5px; }
 
 /* herramientas del resumen 3D */
-.tour-tools { position: absolute; z-index: 3; top: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 6px; max-width: calc(100% - 80px); }
+.tour-tools { position: absolute; z-index: 3; top: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 6px; max-width: calc(100% - 200px); }
 .tour-tools[hidden] { display: none; }
 .tour-tools .tt {
   border: 0; border-radius: 999px; padding: 7px 12px; cursor: pointer; font: 700 12.5px/1 var(--font-body); color: #fff;
@@ -607,3 +607,22 @@ table.score tr.t-over td { background: rgba(200, 50, 42, 0.06); }
 .tour.free-cam .tour-cap { opacity: 0.35; }
 .field.live { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; grid-column: 1 / -1; }
 .field.live .muted { font-size: 12.5px; }
+
+/* pantalla completa del resumen 3D */
+.replay-full {
+  position: absolute; z-index: 5; top: 12px; right: 12px;
+  height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border: 0; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92); color: var(--pine); font: 700 14px/1 var(--font-body); cursor: pointer; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+.replay-full span { font-size: 18px; }
+.replay-modal.immersive { padding: 0; background: #000; }
+.replay-modal.immersive .replay-wrap { width: 100%; height: 100%; gap: 0; }
+.replay-modal.immersive .coach { display: none; }
+.replay-modal.immersive .replay-wrap .tour { height: 100%; border-radius: 0; }
+.replay-modal.immersive .replay-full b { display: none; }
+.replay-modal.immersive .replay-full { top: max(20px, calc(env(safe-area-inset-top, 0px) + 8px)); right: max(72px, calc(env(safe-area-inset-right, 0px) + 60px)); width: 44px; padding: 0; justify-content: center; }
+.replay-modal.immersive .replay-full, .replay-modal.immersive .replay-close { opacity: 0.85; }
+@media (max-width: 860px) {
+  .replay-full b { display: none; }
+  .replay-full { width: 44px; padding: 0; justify-content: center; top: max(20px, calc(env(safe-area-inset-top, 0px) + 8px)); right: max(72px, calc(env(safe-area-inset-right, 0px) + 60px)); }
+}

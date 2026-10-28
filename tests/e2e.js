@@ -309,6 +309,16 @@ async function main() {
     await p.mouse.up();
     await p.waitForTimeout(500);
     check((await on()) === 'Hoyo 1', 'deslizar pasa al hoyo siguiente');
+    await p.click('.replay-full');
+    await p.waitForTimeout(300);
+    const full = await p.evaluate(() => {
+      const r = document.querySelector('#replay').getBoundingClientRect();
+      return document.querySelector('.replay-modal').classList.contains('immersive') && r.width === innerWidth && r.height === innerHeight;
+    });
+    check(full, 'pantalla completa: el visor ocupa toda la ventana');
+    await p.keyboard.press('Escape');
+    await p.waitForTimeout(300);
+    check(await p.evaluate(() => !document.querySelector('.replay-modal').classList.contains('immersive')), 'Escape sale de pantalla completa sin cerrar');
     await p.fill('.coach textarea', 'Salí bien del tee');
     await p.click('.coach [type="submit"]');
     await p.waitForTimeout(800);

@@ -3089,7 +3089,8 @@ ${brief}`;
           <textarea rows="2" maxlength="600" placeholder="¿Qué pasó en este hoyo?" aria-label="Tu comentario"></textarea>
           <div class="coach-row"><span class="coach-note muted"></span><button type="button" class="btn small coach-stop" hidden>Parar</button><button class="btn small primary" type="submit">Enviar</button></div>
         </form>
-      </aside></div><button class="replay-close" aria-label="Cerrar">✕</button>`;
+      </aside></div><button class="replay-close" aria-label="Cerrar">✕</button>
+      <button class="replay-full" aria-label="Pantalla completa" aria-pressed="false"><span aria-hidden="true">⛶</span><b>Pantalla completa</b></button>`;
     document.body.appendChild(modal);
     let hole = data.holes.length === 1 ? data.holes[0].n : null;
     const coach = modal.querySelector('.coach');
@@ -3106,13 +3107,54 @@ ${brief}`;
     };
     ctx();
     bindCoach(coach, r, () => hole, () => GC.Tour.pause(player));
+    // Pantalla completa: la del navegador si se puede (dentro de claude.ai puede no estar permitida) y, en todo
+    // caso, el visor ocupa toda la ventana sin el panel de comentarios.
+    const fullBtn = modal.querySelector('.replay-full');
+    modal.querySelector('#replay').append(fullBtn); // dentro del visor, para no tapar los comentarios
+    const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+    const setFull = (on) => {
+      modal.classList.toggle('immersive', on);
+      fullBtn.setAttribute('aria-pressed', String(on));
+      fullBtn.setAttribute('aria-label', on ? 'Salir de pantalla completa' : 'Pantalla completa');
+      fullBtn.querySelector('b').textContent = on ? 'Salir' : 'Pantalla completa';
+    };
+    const toggleFull = async () => {
+      const on = !modal.classList.contains('immersive');
+      setFull(on);
+      try {
+        if (on) {
+          const req = modal.requestFullscreen || modal.webkitRequestFullscreen;
+          if (req) await req.call(modal);
+          if (screen.orientation && screen.orientation.lock && window.innerHeight > window.innerWidth) {
+            await screen.orientation.lock('landscape').catch(() => {});
+          }
+        } else if (fsEl()) {
+          await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+        }
+      } catch (e) {
+        /* sin pantalla completa del navegador: se queda el modo ventana completa */
+      }
+    };
+    const onFs = () => { if (!fsEl() && modal.classList.contains('immersive') && modal.dataset.fs === '1') setFull(false); modal.dataset.fs = fsEl() ? '1' : '0'; };
+    document.addEventListener('fullscreenchange', onFs);
+    document.addEventListener('webkitfullscreenchange', onFs);
+    fullBtn.onclick = toggleFull;
     const close = () => {
       if (coach.abort) coach.abort();
+      if (fsEl()) (document.exitFullscreen || document.webkitExitFullscreen).call(document).catch(() => {});
       GC.Tour.dispose(player);
       modal.remove();
       document.removeEventListener('keydown', onKey);
+      document.removeEventListener('fullscreenchange', onFs);
+      document.removeEventListener('webkitfullscreenchange', onFs);
     };
-    const onKey = (e) => { if (e.key === 'Escape' && document.activeElement.tagName !== 'TEXTAREA') close(); };
+    const onKey = (e) => {
+      if (document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT') return;
+      if (e.key === 'Escape') {
+        if (modal.classList.contains('immersive')) setFull(false);
+        else close();
+      } else if (e.key === 'f' || e.key === 'F') toggleFull();
+    };
     document.addEventListener('keydown', onKey);
     modal.querySelector('.replay-close').onclick = close;
   }
