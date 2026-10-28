@@ -640,3 +640,24 @@ table.score tr.t-over td { background: rgba(200, 50, 42, 0.06); }
   .tour.replay .tour-cap .t-lie img { width: 26px; height: 26px; }
   .tour.replay .tour-shade { background: linear-gradient(180deg, rgba(8, 28, 17, 0.3) 0%, rgba(8, 28, 17, 0) 18%, rgba(8, 28, 17, 0) 55%, rgba(8, 28, 17, 0.85) 100%); }
 }
+
+/* pantalla completa de «Conoce el campo» */
+.tour-full {
+  position: absolute; z-index: 5; top: 12px; right: 12px; width: 44px; height: 44px; border: 0; border-radius: 50%;
+  display: none; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.92); color: var(--pine);
+  font: 700 18px/1 var(--font-body); cursor: pointer; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+.tour.playing .tour-full, .tour.paused .tour-full, .tour.ended .tour-full, .tour.immersive .tour-full { display: inline-flex; }
+.tour.immersive {
+  position: fixed; inset: 0; z-index: 70; width: 100vw; height: 100vh; height: 100dvh; aspect-ratio: auto; min-height: 0;
+  border-radius: 0; box-shadow: none;
+}
+.tour.immersive .tour-full { top: max(12px, env(safe-area-inset-top, 0px)); right: max(12px, env(safe-area-inset-right, 0px)); }
+html.tour-immersive, html.tour-immersive body { overflow: hidden; }
+@media (max-width: 600px) {
+  .tour .tour-cap { gap: 4px; bottom: 58px; }
+  .tour .tour-cap .t-title { font-size: 28px; }
+  .tour .tour-cap .t-line { font-size: 14px; }
+  .tour .tour-cap .t-chips span { font-size: 11.5px; padding: 4px 7px; }
+  .tour .tour-cap .t-tip { font-size: 12px; }
+}

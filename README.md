@@ -56,6 +56,8 @@ con el color de su copa en la ortofoto, banderas y tees. Tras la introducción e
 cancha de prácticas y puente, con datos calculados: hoyos cercanos, superficie y fondo de la cancha, largo del
 puente) y luego recorre cada hoyo del tee al green con su ficha: par, metros, hándicap, tipo de hoyo, desnivel,
 agua, búnkeres y un consejo. Se puede pausar y saltar de tramo.
+Tiene botón de pantalla completa (o tecla F). En este vídeo y en los resúmenes la cámara encuadra en el hueco que
+dejan libre la ficha y los botones, y se aleja lo justo para que se vea lo importante de cada plano.
 `tools/campo_3d.py` genera `js/campo3d.js`, las texturas de `img/` y `datos/sotoverde/campo3d_control.jpg`
 (control de lo extraído sobre la ortofoto). Alturas de los edificios supuestas (casas 5,6 m más tejado).
 

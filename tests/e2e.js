@@ -149,6 +149,23 @@ async function main() {
     await p.context().close();
   }
 
+  console.log('Conoce el campo a pantalla completa');
+  {
+    const p = await page({ viewport: { width: 1100, height: 800 } });
+    await p.waitForSelector('#tour .tour-play');
+    await p.click('#tour .tour-play');
+    await p.waitForSelector('#tour.playing', { timeout: 30000 });
+    await p.click('#tour .tour-full');
+    await p.waitForTimeout(300);
+    const r = await p.locator('#tour').boundingBox();
+    check(r.width === 1100 && r.height === 800, 'ocupa toda la ventana');
+    await p.keyboard.press('Escape');
+    await p.waitForTimeout(300);
+    check(await p.evaluate(() => !document.querySelector('#tour').classList.contains('immersive')), 'Escape vuelve a la portada');
+    check(p.errors.length === 0, 'sin errores');
+    await p.context().close();
+  }
+
   console.log('Anotar un hoyo');
   {
     const p = await page();

@@ -204,7 +204,7 @@
     if (club) {
       const list = near(model, club, 80);
       stops.push({
-        at: club, radius: 85, height: 42,
+        at: club, radius: 85, height: 42, fit: [[club.x, club.y, club.h + 9]].concat(parking ? [[parking.x, parking.y, 2]] : []),
         cap: {
           eyebrow: 'Instalaciones', title: 'Casa club',
           line: list.length ? `Junto ${nearText(list)}` : 'El corazón del campo',
@@ -221,6 +221,7 @@
       const side = Math.max(...bays.p.map((q, i) => Math.hypot(q[0] - bays.p[(i + 1) % bays.p.length][0], q[1] - bays.p[(i + 1) % bays.p.length][1])));
       stops.push({
         at: { x: (bc.x * 2 + field.x) / 3, y: (bc.y * 2 + field.y) / 3 }, radius: 120, height: 55, from: bc,
+        fit: bays.p.map((q) => [q[0], q[1], 5]).concat([[field.x, field.y, field.h + 9]]),
         cap: {
           eyebrow: 'Instalaciones', title: 'Cancha de prácticas',
           line: `Puestos cubiertos de unos ${Math.round(side / 5) * 5} m${len ? ` y campo de unos ${Math.round(len / 10) * 10} m de fondo` : ''}`,
@@ -234,7 +235,7 @@
       const mid = { x: (br.a[0] + br.b[0]) / 2, y: (br.a[1] + br.b[1]) / 2 };
       const list = near(model, mid, 110);
       stops.push({
-        at: mid, radius: 70, height: 26,
+        at: mid, radius: 70, height: 26, fit: [[br.a[0], br.a[1], 2], [br.b[0], br.b[1], 2], [mid.x, mid.y, 18]],
         cap: {
           eyebrow: 'Instalaciones', title: 'El puente',
           line: `${Math.round(Math.hypot(br.b[0] - br.a[0], br.b[1] - br.a[1]))} m sobre el lago grande`,
@@ -292,6 +293,26 @@
         <button class="tb" data-a="next" aria-label="Tramo siguiente">››</button>
         <div class="tour-prog" role="slider" aria-label="Progreso del recorrido" aria-valuemin="0" aria-valuemax="100"></div>
       </div>`;
+    if (!opts.data) {
+      const fb = document.createElement('button');
+      fb.className = 'tour-full';
+      fb.setAttribute('aria-label', 'Pantalla completa');
+      fb.setAttribute('aria-pressed', 'false');
+      fb.innerHTML = '<span aria-hidden="true">⛶</span>';
+      fb.onclick = () => toggleFull(player);
+      container.append(fb);
+      const onFs = () => {
+        const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+        if (!fsEl && player.fsOn) setFull(player, false);
+        player.fsOn = !!fsEl;
+      };
+      document.addEventListener('fullscreenchange', onFs);
+      document.addEventListener('webkitfullscreenchange', onFs);
+      container.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && container.classList.contains('immersive')) setFull(player, false);
+        if (e.key === 'f' || e.key === 'F') toggleFull(player);
+      });
+    }
     drawPoster(player);
     container.querySelector('.tour-play').onclick = () => start(player);
     container.querySelectorAll('.tour-bar .tb').forEach((b) => (b.onclick = () => action(player, b.dataset.a)));
@@ -476,6 +497,35 @@
     a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
+  // Pantalla completa del recorrido de la portada: la del navegador si se puede y, en todo caso, a toda la ventana.
+  function setFull(player, on) {
+    const c = player.container;
+    c.classList.toggle('immersive', on);
+    document.documentElement.classList.toggle('tour-immersive', on);
+    const b = c.querySelector('.tour-full');
+    b.setAttribute('aria-pressed', String(on));
+    b.setAttribute('aria-label', on ? 'Salir de pantalla completa' : 'Pantalla completa');
+    b.innerHTML = on ? '<span aria-hidden="true">✕</span>' : '<span aria-hidden="true">⛶</span>';
+  }
+
+  async function toggleFull(player) {
+    const c = player.container;
+    const on = !c.classList.contains('immersive');
+    setFull(player, on);
+    c.focus();
+    try {
+      if (on) {
+        const req = c.requestFullscreen || c.webkitRequestFullscreen;
+        if (req) await req.call(c);
+      } else if (document.fullscreenElement || document.webkitFullscreenElement) {
+        await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      }
+    } catch (e) {
+      /* sin pantalla completa del navegador: queda a toda la ventana */
+    }
+    if (on && !player.playing && !player.three) start(player);
   }
 
   // Libera la escena WebGL (los navegadores limitan cuántos contextos puede haber a la vez).
@@ -867,7 +917,7 @@
     const r = { width: c.clientWidth, height: c.clientHeight };
     let top = 10;
     let bottom = r.height - 10;
-    for (const el of c.querySelectorAll('.tour-tools:not([hidden]), .replay-full')) {
+    for (const el of c.querySelectorAll('.tour-tools:not([hidden]), .replay-full, .tour-full')) {
       if (el.offsetParent === c && el.offsetTop < r.height / 3) top = Math.max(top, el.offsetTop + el.offsetHeight + 6);
     }
     const cap = c.querySelector('.tour-cap');
@@ -904,9 +954,18 @@
       }
       return true;
     };
-    for (let i = 0; i < 16 && !fits(); i++) {
+    const base = dir.length();
+    const max = s.maxPull || 6;
+    for (let i = 0; i < 16 && !fits() && dir.length() < base * max; i++) {
       dir.multiplyScalar(1.12);
       s.pos.copy(s.look).add(dir);
+    }
+    // la niebla se aleja con la cámara para que lo encuadrado no quede borroso
+    const fog = player.three.scene.fog;
+    if (fog) {
+      const dist = dir.length();
+      fog.near = Math.max(650, dist * 0.9);
+      fog.far = Math.max(1500, dist * 2.6);
     }
   }
 
@@ -946,7 +1005,9 @@
       const a = s.kind === 'intro' ? -2.2 + k * 1.3 : -0.9 + k * 0.8;
       const rad = s.kind === 'intro' ? 560 - k * 150 : 450 + k * 170;
       const hgt = s.kind === 'intro' ? 320 - k * 120 : 220 + k * 150;
-      return { pos: new THREE.Vector3(Math.cos(a) * rad, hgt, Math.sin(a) * rad), look: center, seg, sub: 0 };
+      // todas las banderas a la vista
+      const fit = model.holes.map((ho) => W(ho.pin.x, ho.pin.y, 15));
+      return { pos: new THREE.Vector3(Math.cos(a) * rad, hgt, Math.sin(a) * rad), look: center, seg, sub: 0, fit, maxPull: 1.5 };
     }
     if (s.kind === 'club') {
       // una parada por instalación, girando despacio alrededor
@@ -957,7 +1018,7 @@
       let ang = -2.4 + sub * 1.1 + kk * 0.55;
       if (st.from) ang = Math.atan2(st.from.y - st.at.y, st.from.x - st.at.x) + (kk - 0.5) * 0.5; // desde detrás de los puestos
       const p = { x: st.at.x + Math.cos(ang) * st.radius, y: st.at.y + Math.sin(ang) * st.radius };
-      return { pos: W(p.x, p.y, st.height - kk * 6), look: W(st.at.x, st.at.y, 3), seg, sub };
+      return { pos: W(p.x, p.y, st.height - kk * 6), look: W(st.at.x, st.at.y, 3), seg, sub, fit: (st.fit || []).map((q) => W(q[0], q[1], q[2])), maxPull: 2 };
     }
     const ho = model.holes[s.i];
     const L = GC.dist(ho.tee, ho.pin) || 1;
@@ -971,7 +1032,9 @@
     const py = from.y + (to.y - from.y) * e;
     const lift = (42 + L * 0.15) * (1 - e) + 30 * e;
     const lookPt = { x: ho.tee.x + (ho.pin.x - ho.tee.x) * (0.55 + 0.45 * e), y: ho.tee.y + (ho.pin.y - ho.tee.y) * (0.55 + 0.45 * e) };
-    return { pos: W(px, py, lift), look: W(lookPt.x, lookPt.y, 2), seg, sub: 0, fit: [W(ho.pin.x, ho.pin.y, 12)] };
+    // el green siempre; el tee mientras la cámara está detrás de él; y el número del hoyo sobre la bandera
+    const fit = [W(ho.pin.x, ho.pin.y, 16), W(ho.pin.x, ho.pin.y, 0)];
+    return { pos: W(px, py, lift), look: W(lookPt.x, lookPt.y, 2), seg, sub: 0, fit, maxPull: 1.6 };
   }
 
   function render(player) {
