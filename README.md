@@ -27,9 +27,15 @@ fallo más repetido. En cada golpe recomienda palo y punto de mira según la dis
 desnivel real del MDT (1 m de subida ≈ 1 m más), viento (+0,62 %/km/h de cara, −0,31 %/km/h a favor; ×1,3 con
 bola alta y ×0,7 con bola baja), temperatura (−0,2 %/°C sobre la de referencia) y deriva por viento cruzado
 y por el vuelo habitual; avisa si el fallo habitual acaba en agua, búnker o fuera de límites.
-**Dictar golpe** (en la página publicada): «hierro 7, rough a la derecha, quedan 40». La IA solo interpreta la frase
-(palo, distancia o lo que queda, lado y lie); la app calcula el punto sobre la línea a bandera, lo busca en esa
-superficie y lo deja como bola provisional para ajustar y confirmar. Con el micrófono del teclado del móvil se dicta.
+**Dictar con IA** (botón 🎙 del mapa o «Dictar» en el panel, en la página publicada): un golpe («hierro 7, rough a la
+derecha, quedan 40») queda como bola provisional para ajustar; varios a la vez («driver a la calle, hierro 8 al
+búnker, sand al green y dos putts») se apuntan seguidos y, si se dicen los putts, el hoyo se termina. La IA solo
+interpreta la frase; la app calcula cada punto sobre la línea a bandera en la superficie dicha. Se dicta con el
+micrófono del teclado o con «Hablar» donde el navegador lo permita.
+
+**Golpes estimados (≈)**: golpes en el mapa reconstruidos a partir del total de la tarjeta (palos de tu bolsa, putts
+lógicos para el resultado). Se ven en la tarjeta, el mapa y el 3D marcados con ≈, pero no cuentan en distancias por
+palo, fallos, putts ni calles/greens; al mover o cambiar uno pasa a ser real.
 En **Mi bolsa**, el fallo más repetido se mide con los golpes del mapa (lado al que se desvían más de 8 m) y en
 **Mi progreso** se ven los putts según la distancia del primer putt (bola apuntada en el green).
 

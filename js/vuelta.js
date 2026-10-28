@@ -568,7 +568,7 @@
         const hs = r.scores && r.scores[n];
         if (!hs) continue;
         for (const e of hs.entries) {
-          if (e.t !== 's' || !e.f || !e.c) continue;
+          if (e.t !== 's' || !e.f || !e.c || e.est) continue;
           const m = (acc[e.c] = acc[e.c] || {});
           m[e.f] = (m[e.f] || 0) + 1;
         }
@@ -648,16 +648,17 @@
       }
     });
     const firstShot = hs.entries.find((e) => e.t === 's');
-    const fairway = par >= 4 && firstShot ? firstShot.l === 'fairway' : null;
+    const est = hs.entries.some((e) => e.est);
+    const fairway = par >= 4 && firstShot && !est ? firstShot.l === 'fairway' : null;
     const holedAt = hs.done ? strokes : null;
-    const gir = card ? null : hs.done || firstGreen
+    const gir = card || est ? null : hs.done || firstGreen
       ? (firstGreen != null && firstGreen <= par - 2) || (holedAt != null && hs.putts === 0 && holedAt <= par - 2)
       : null;
     const pens = hs.entries.filter((e) => e.t === 'p').length;
     const cur = pos[pos.length - 1];
     return {
       par, strokes, putts: card ? null : hs.putts, done: hs.done, fairway, gir, pens, shots,
-      cardStrokes: strokesOf(hs), cardDone: scoreDone(hs), detailed: strokes > 0,
+      cardStrokes: strokesOf(hs), cardDone: scoreDone(hs), detailed: strokes > 0, est,
       toPin: GC.dist(cur, h.pin), lie: lastLie(n), started: strokesOf(hs) > 0,
     };
   }
@@ -697,7 +698,7 @@
         if (!hs || !byNumber[n]) continue;
         const pos = withRound(r, () => positions(n));
         hs.entries.forEach((e, i) => {
-          if (e.t !== 's' || !e.c || e.l === 'water' || e.l === 'ob') return;
+          if (e.t !== 's' || !e.c || e.est || e.l === 'water' || e.l === 'ob') return;
           const d = GC.dist(pos[i], pos[i + 1]);
           if (d < 5) return;
           (acc[e.c] = acc[e.c] || []).push(d);
@@ -974,7 +975,7 @@
     if (hs0 && hs0.total != null && !liveStrokes(hs0)) hs0.done = false;
     Object.assign(ui, {
       editIndex: null, moveIndex: null, pendingDrop: false, cam: null, loupe: null, ghost: null,
-      target: null, pickTarget: false, clubManual: false, more: false, putting: false,
+      target: null, pickTarget: false, clubManual: false, more: false, putting: false, dictate: false,
     });
     const n = round.holes[idx];
     ui.selectedClub = suggestClub(n);
@@ -999,6 +1000,7 @@
         <button id="zoom-all" aria-label="Ver el hoyo entero">TODO</button>
         <button id="zoom-auto" aria-label="Encuadre automático de bola y green">AUTO</button>
         <button id="gps" aria-label="Usar mi posición">GPS</button>
+        <button id="dictate-map" class="mic" aria-label="Dictar golpes" hidden>🎙</button>
       </div>
       <section class="hv-sheet" id="sheet" aria-label="Golpes del hoyo"></section>`;
     canvas = app.querySelector('canvas');
@@ -1008,6 +1010,9 @@
     app.querySelector('#go-home').onclick = renderHome;
     app.querySelector('#go-card').onclick = renderCard;
     app.querySelector('#zoom-in').onclick = () => zoomBy(1.6);
+    const micBtn = app.querySelector('#dictate-map');
+    micBtn.hidden = !aiReady;
+    micBtn.onclick = () => openDictation(!ui.dictate);
     app.querySelector('#zoom-out').onclick = () => zoomBy(1 / 1.6);
     app.querySelector('#zoom-all').onclick = () => { ui.cam = allCamera(); drawMap(); };
     app.querySelector('#zoom-auto').onclick = () => { ui.cam = null; drawMap(); };
@@ -1644,6 +1649,7 @@
       const e = hs.entries[ui.moveIndex];
       e.x = x;
       e.y = y;
+      delete e.est;
       if (e.t === 's') e.l = detectLie(h, x, y);
       if (ui.ghostPath) {
         e.p = ui.ghostPath;
@@ -1781,16 +1787,12 @@
     }
 
     const tools = hs.done ? '' : `<div class="tools">
+      ${aiReady && !ui.pendingDrop && ui.moveIndex == null ? `<button class="btn small mic" id="dictate" aria-expanded="${ui.dictate}">🎙 Dictar</button>` : ''}
       ${putting ? '<button class="btn small" id="back-shots">Otro golpe</button>' : '<button class="btn small" id="to-putts">Putts / green</button>'}
       <button class="btn small" id="pen">+1 penalización</button>
       <button class="btn small" id="undo" ${hs.entries.length || hs.putts ? '' : 'disabled'}>Deshacer</button>
       ${putting ? '' : `<button class="btn small" id="finish2" ${st.strokes ? '' : 'disabled'}>Terminar hoyo</button>`}
-      ${aiReady && !putting && !ui.pendingDrop && ui.moveIndex == null ? `<button class="btn small" id="dictate" aria-expanded="${ui.dictate}">Dictar golpe</button>` : ''}
-      <button class="btn small ghost" id="more" aria-expanded="${ui.more}">${ui.more ? 'Menos ▴' : 'Más ▾'}</button></div>
-      ${ui.dictate && !hs.done ? `<form class="dictate" id="dictate-form">
-        <input id="dictate-text" maxlength="200" autocomplete="off" placeholder="Ej.: hierro 7, rough a la derecha, quedan 40" aria-label="Describe el golpe">
-        <button class="btn small primary" type="submit">Colocar</button>
-        <span class="muted">Usa el micrófono del teclado. La IA coloca la bola y el palo; tú confirmas.</span></form>` : ''}`;
+      <button class="btn small ghost" id="more" aria-expanded="${ui.more}">${ui.more ? 'Menos ▴' : 'Más ▾'}</button></div>`;
 
     // detalles: condiciones, objetivo y lista de golpes
     let details = '';
@@ -1799,7 +1801,7 @@
       const list = hs.entries.map((e, i) => {
         const d = e.t === 's' ? Math.round(GC.dist(pos[i], pos[i + 1])) : null;
         return `<button class="shot-chip${e.t === 'p' ? ' pen' : ''}" data-i="${i}" aria-pressed="${ui.editIndex === i}"><span class="n">${i + 1}</span>
-          ${e.t === 'p' ? '<b>Penalización</b>' : `<b>${esc(clubName(e.c))}</b><span class="muted">${lieName(e.l)}</span>${e.f ? `<span class="shape">${shapeName(e.f)}</span>` : ''}<span class="d">${d} m</span>`}</button>`;
+          ${e.t === 'p' ? '<b>Penalización</b>' : `<b>${esc(clubName(e.c))}</b><span class="muted">${lieName(e.l)}</span>${e.f ? `<span class="shape">${shapeName(e.f)}</span>` : ''}<span class="d">${d} m</span>${e.est ? '<span class="est" title="Estimado">≈</span>' : ''}`}</button>`;
       }).join('');
       let editor = '';
       if (ui.editIndex != null && hs.entries[ui.editIndex]) {
@@ -1857,15 +1859,8 @@
       renderHoleUi();
     }));
     if ($s('#more')) $s('#more').onclick = toggleMore;
-    if ($s('#dictate')) $s('#dictate').onclick = () => {
-      ui.dictate = !ui.dictate;
-      renderHoleUi();
-      if (ui.dictate) $s('#dictate-text') && app.querySelector('#dictate-text').focus();
-    };
-    if ($s('#dictate-form')) $s('#dictate-form').onsubmit = (e) => {
-      e.preventDefault();
-      dictateShot(app.querySelector('#dictate-text').value);
-    };
+    if ($s('#dictate')) $s('#dictate').onclick = () => openDictation(!ui.dictate);
+    renderDictation();
     if ($s('#use-rec')) $s('#use-rec').onclick = () => { ui.selectedClub = rec.club.id; ui.clubManual = false; renderHoleUi(); };
     if ($s('#cancel')) $s('#cancel').onclick = () => { clearGhost(); afterChange(); };
     if ($s('#commit')) $s('#commit').onclick = commitGhost;
@@ -1962,8 +1957,8 @@
       }));
       if (ui.editIndex != null && hs.entries[ui.editIndex]) {
         const e = hs.entries[ui.editIndex];
-        sheet.querySelectorAll('#e-club button').forEach((b) => (b.onclick = () => { e.c = b.dataset.k; afterChange(); }));
-        sheet.querySelectorAll('#e-lie button').forEach((b) => (b.onclick = () => { e.l = b.dataset.k; afterChange(); }));
+        sheet.querySelectorAll('#e-club button').forEach((b) => (b.onclick = () => { e.c = b.dataset.k; delete e.est; afterChange(); }));
+        sheet.querySelectorAll('#e-lie button').forEach((b) => (b.onclick = () => { e.l = b.dataset.k; delete e.est; afterChange(); }));
         $s('#e-move').onclick = () => {
           if (hs.done) hs.done = false;
           ui.moveIndex = ui.editIndex;
@@ -1997,11 +1992,88 @@
   }
 
   /*
-   * Dictar un golpe: «driver, calle izquierda, quedan 90». La IA solo interpreta el texto (palo, distancia o lo
-   * que queda, lado y lie); la posición la calcula la app sobre la línea a bandera y la busca en la superficie
-   * dicha. Queda como bola provisional para que el jugador la ajuste y confirme.
+   * Dictado con IA. Se puede dictar un golpe («hierro 7, rough derecha, quedan 40») o el hoyo entero («driver a la
+   * calle, hierro 8 al búnker, sand al green y dos putts»). La IA solo interpreta la frase; las posiciones las calcula
+   * la app sobre la línea a bandera, buscando la superficie dicha. Un golpe suelto queda como bola provisional para
+   * ajustarla; varios se apuntan seguidos y se pueden revisar en la lista (Más).
    */
-  async function dictateShot(text) {
+  const DICT_EXAMPLES = [
+    'Driver a la calle, hierro 8 al green y dos putts',
+    'Hierro 7 al rough derecha, quedan 40',
+    'Madera 3 al agua, drop, pitch al green y un putt',
+  ];
+
+  function openDictation(on) {
+    ui.dictate = on;
+    renderDictation();
+    if (on) {
+      const t = app.querySelector('#dict-text');
+      if (t) t.focus();
+    }
+  }
+
+  function renderDictation() {
+    let panel = app.querySelector('#dict-panel');
+    const hs = view === 'hole' ? holeScore(currentN()) : null;
+    if (!ui.dictate || !hs || hs.done) {
+      if (panel) panel.remove();
+      const mb = app.querySelector('#dictate-map');
+      if (mb) mb.setAttribute('aria-pressed', 'false');
+      return;
+    }
+    if (panel) return;
+    const speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+    panel = document.createElement('form');
+    panel.id = 'dict-panel';
+    panel.className = 'dict-panel glass';
+    panel.innerHTML = `<div class="dict-head"><b>Dictar golpes</b><span class="muted">Hoyo ${currentN()} · uno o todos a la vez</span>
+        <button type="button" class="nav" id="dict-close" aria-label="Cerrar">✕</button></div>
+      <textarea id="dict-text" rows="2" maxlength="400" placeholder="${DICT_EXAMPLES[0]}" aria-label="Describe tus golpes"></textarea>
+      <div class="dict-ex">${DICT_EXAMPLES.map((x) => `<button type="button" data-ex="${esc(x)}">${esc(x)}</button>`).join('')}</div>
+      <div class="dict-row">${speech ? '<button type="button" class="btn small" id="dict-talk">🎤 Hablar</button>' : '<span class="muted">Usa el micrófono del teclado del móvil.</span>'}
+        <button class="btn primary" type="submit" id="dict-go">Colocar</button></div>`;
+    app.append(panel);
+    const mb = app.querySelector('#dictate-map');
+    if (mb) mb.setAttribute('aria-pressed', 'true');
+    const text = panel.querySelector('#dict-text');
+    panel.querySelector('#dict-close').onclick = () => openDictation(false);
+    panel.querySelectorAll('[data-ex]').forEach((b) => (b.onclick = () => { text.value = b.dataset.ex; text.focus(); }));
+    text.onkeydown = (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        panel.requestSubmit();
+      }
+    };
+    panel.onsubmit = (e) => {
+      e.preventDefault();
+      dictateShots(text.value);
+    };
+    const talk = panel.querySelector('#dict-talk');
+    if (talk) talk.onclick = () => {
+      try {
+        const rec = new speech();
+        rec.lang = 'es-ES';
+        rec.interimResults = true;
+        talk.textContent = '🎤 Escuchando…';
+        rec.onresult = (ev) => { text.value = [...ev.results].map((r) => r[0].transcript).join(' '); };
+        rec.onerror = () => toast('El micrófono no está disponible aquí: usa el del teclado.');
+        rec.onend = () => { talk.textContent = '🎤 Hablar'; };
+        rec.start();
+      } catch (err) {
+        toast('El micrófono no está disponible aquí: usa el del teclado.');
+      }
+    };
+  }
+
+  // Palo más parecido a la distancia (para golpes dictados sin palo).
+  function clubForDistance(d) {
+    if (d < 25) return bagClub('lw').on ? 'lw' : 'sw';
+    if (d < 45) return 'sw';
+    const on = CLUBS.filter((c) => bagClub(c.id).on && c.id !== 'dr');
+    return on.reduce((a, c) => (Math.abs(bagClub(c.id).dist - d) < Math.abs(bagClub(a.id).dist - d) ? c : a), on[0]).id;
+  }
+
+  async function dictateShots(text) {
     const said = String(text || '').trim();
     if (!said) return;
     const n = currentN();
@@ -2014,40 +2086,44 @@
       return;
     }
     const clubs = CLUBS.filter((c) => bagClub(c.id).on).map((c) => `${c.id}=${c.name} (${bagClub(c.id).dist} m)`).join(', ');
-    const btn = app.querySelector('#dictate-form [type="submit"]');
+    const btn = app.querySelector('#dict-go');
     if (btn) {
       btn.disabled = true;
       btn.textContent = 'Pensando…';
     }
     try {
-      const r = await sample.json(`Un golfista describe dónde quedó su golpe en el hoyo ${n} (par ${h.par}). La bola estaba a ${Math.round(GC.dist(from, h.pin))} m de la bandera, en ${lieName(lastLie(n)).toLowerCase()}.
+      const r = await sample.json(`Un golfista dicta lo que hizo en el hoyo ${n} (par ${h.par}, ${h.length} m). Su bola está ahora a ${Math.round(GC.dist(from, h.pin))} m de la bandera, en ${lieName(lastLie(n)).toLowerCase()}, y lleva ${holeStats(n).strokes} golpes.
 Palos de su bolsa (id=nombre): ${clubs}.
 Lo que dice: «${said.replace(/[«»]/g, '')}»
-Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le quedan a bandera o null, "distance": metros que recorrió el golpe o null, "side": "izquierda"|"derecha"|"centro"|null, "lie": "fairway"|"rough"|"sand"|"green"|"water"|"ob"|null}.
-"calle"=fairway, "búnker"/"arena"=sand, "agua"/"lago"=water, "fuera"=ob. No inventes lo que no dice.`, { modelTier: 'quick' });
-      placeDictated(h, from, r || {});
+Responde SOLO con JSON: {"shots": [{"club": id o null, "toPin": metros que le quedan a bandera o null, "distance": metros que recorrió o null, "side": "izquierda"|"derecha"|"centro"|null, "lie": "fairway"|"rough"|"sand"|"green"|"water"|"ob"|null}], "putts": número de putts o null}.
+Un elemento de "shots" por golpe, en orden (sin contar los putts). "calle"=fairway, "búnker"/"arena"=sand, "agua"/"lago"=water, "fuera"=ob; "pitch"/"chip" suelen ser gw, sw o lw. No inventes lo que no dice.`, { modelTier: 'quick' });
+      applyDictation(h, from, r || {});
     } catch (e) {
       toast(e && e.code === 'not_granted' ? 'Sin permiso para la IA: toca en el mapa.' : 'No se pudo interpretar: prueba otra vez o toca en el mapa.');
       if (e && ['not_granted', 'sampling_disabled', 'not_declared'].includes(e.code)) {
         aiReady = false;
-        ui.dictate = false;
+        openDictation(false);
         renderHoleUi();
-      } else if (btn) {
+      }
+    } finally {
+      if (btn && btn.isConnected) {
         btn.disabled = false;
         btn.textContent = 'Colocar';
       }
     }
   }
 
-  function placeDictated(h, from, r) {
+  // Punto de un golpe dictado: sobre la línea a bandera, en el lado y la superficie dichos.
+  function dictPoint(h, from, r, nearPin) {
     const L = GC.dist(from, h.pin) || 1;
     const u = { x: (h.pin.x - from.x) / L, y: (h.pin.y - from.y) / L };
     const right = { x: -u.y, y: u.x };
     const club = r.club && CLUBS.some((c) => c.id === r.club) ? r.club : null;
     let along;
     if (Number.isFinite(r.toPin)) along = L - r.toPin;
+    else if (nearPin != null) along = L - nearPin;
     else if (Number.isFinite(r.distance)) along = r.distance;
-    else if (club) along = bagClub(club).dist;
+    else if (club) along = Math.min(bagClub(club).dist, L + 15);
     else along = Math.min(L, 150);
     along = GC.clamp(along, 2, L + 60);
     const base = { x: from.x + u.x * along, y: from.y + u.y * along };
@@ -2056,10 +2132,19 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
     let best = null;
     const at = (k) => ({ x: base.x + right.x * k, y: base.y + right.y * k });
     if (lie) {
-      // el punto más cercano a la línea, en el lado dicho, que tenga ese lie (hasta 45 m)
+      // el punto más cercano a la línea, en el lado dicho, que tenga ese lie (hasta 45 m; si no, avanzando o retrocediendo)
       for (let k = 0; k <= 45 && !best; k += 1.5) {
         for (const sd of sides) {
           const p = at(k * sd);
+          if (h.surfaceAt(p.x, p.y) === lie) {
+            best = p;
+            break;
+          }
+        }
+      }
+      for (let k = 2; k <= 40 && !best; k += 2) {
+        for (const sg of [1, -1]) {
+          const p = { x: base.x + u.x * k * sg, y: base.y + u.y * k * sg };
           if (h.surfaceAt(p.x, p.y) === lie) {
             best = p;
             break;
@@ -2070,17 +2155,68 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
     if (!best) best = r.side === 'izquierda' ? at(-10) : r.side === 'derecha' ? at(10) : base;
     best.x = GC.clamp(best.x, 1, h.width - 1);
     best.y = GC.clamp(best.y, 1, h.height - 1);
-    ui.ghost = roundPt(best);
-    ui.ghostPath = null;
-    if (club) {
-      ui.selectedClub = club;
-      ui.clubManual = true;
+    return { p: roundPt(best), club };
+  }
+
+  function applyDictation(h, from, r) {
+    const n = currentN();
+    const hs = holeScore(n);
+    const shots = Array.isArray(r.shots) ? r.shots.filter((x) => x && typeof x === 'object') : r.club || r.lie ? [r] : [];
+    const putts = Number.isFinite(r.putts) ? GC.clamp(Math.round(r.putts), 0, 6) : null;
+    if (!shots.length && putts == null) {
+      toast('No he entendido ningún golpe: prueba con «palo, dónde quedó».');
+      return;
     }
-    ui.dictate = false;
-    ui.camAuto = false;
-    toast(`${club ? clubName(club) + ' · ' : ''}${lieName(h.surfaceAt(best.x, best.y))}: revisa la bola y confirma.`);
+    const before = holeStats(n).strokes;
+    // un golpe suelto: bola provisional para ajustar y confirmar
+    if (shots.length === 1 && putts == null) {
+      const { p, club } = dictPoint(h, from, shots[0]);
+      ui.ghost = p;
+      ui.ghostPath = null;
+      if (club) {
+        ui.selectedClub = club;
+        ui.clubManual = true;
+      }
+      openDictation(false);
+      ui.camAuto = false;
+      toast(`${club ? clubName(club) + ' · ' : ''}${lieName(h.surfaceAt(p.x, p.y))}: revisa la bola y confirma.`);
+      drawMap();
+      renderHoleUi();
+      return;
+    }
+    // varios: se apuntan seguidos
+    let cur = from;
+    const nearByPutts = putts == null ? null : putts <= 1 ? 1.5 : putts === 2 ? 6 : 12;
+    shots.forEach((sh, i) => {
+      const last = i === shots.length - 1;
+      const toGreen = last && (sh.lie === 'green' || (putts && !sh.lie));
+      const { p, club } = dictPoint(h, cur, toGreen && sh.lie == null ? { ...sh, lie: 'green' } : sh, toGreen && !Number.isFinite(sh.toPin) ? nearByPutts : null);
+      const l = detectLie(h, p.x, p.y);
+      hs.entries.push({ t: 's', x: p.x, y: p.y, c: club || clubForDistance(GC.dist(cur, p)), l });
+      if (l === 'water' || l === 'ob') hs.entries.push({ t: 'p' }); // penalización; se puede mover el drop desde la lista
+      cur = p;
+    });
+    if (putts != null) {
+      hs.putts = putts;
+      ui.putting = putts > 0;
+    }
+    openDictation(false);
+    ui.ghost = null;
+    ui.more = true;
+    ui.selectedClub = suggestClub(n);
+    ui.cam = null;
+    Store.save(round);
     drawMap();
     renderHoleUi();
+    if (putts) {
+      // con los putts dictados el hoyo está acabado: se termina como con «Embocada» (resultado y siguiente hoyo)
+      toast(`${shots.length} golpe${shots.length === 1 ? '' : 's'} y ${putts} putt${putts === 1 ? '' : 's'} apuntados. Puedes revisarlos en la tarjeta.`);
+      const fin = app.querySelector('#finish') || app.querySelector('#finish2');
+      if (fin) fin.click();
+      return;
+    }
+    toast(`${shots.length} golpe${shots.length === 1 ? '' : 's'} apuntado${shots.length === 1 ? '' : 's'}: revísalos en la lista (Más).`);
+    notifyPar(n, before);
   }
 
   function useGps() {
@@ -2320,7 +2456,7 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
       rows.push(`<tr class="link${tint}" data-i="${i}"><td>${n}${played && has3d ? `<button class="mini3d" data-n="${n}" aria-label="Ver el hoyo ${n} en 3D">3D</button>` : ''}</td><td>${st.par}</td>
         <td>${card && cardEdit && !st.detailed
           ? `<span class="stepper sm"><button data-h="${n}" data-d="-1" aria-label="Quitar un golpe en el hoyo ${n}">−</button><span class="val">${played ? mark(ks, st.par) : '–'}</span><button data-h="${n}" data-d="1" aria-label="${played ? 'Añadir un golpe' : 'Poner resultado'} en el hoyo ${n}">+</button></span>`
-          : played ? mark(ks, st.par) + (st.cardDone ? '' : '<span class="muted">…</span>') + (card && cardEdit ? ' <span class="muted">en el mapa</span>' : '') : '–'}</td>
+          : played ? mark(ks, st.par) + (st.est ? '<span class="est" title="Golpes del mapa estimados a partir de la tarjeta">≈</span>' : '') + (st.cardDone ? '' : '<span class="muted">…</span>') + (card && cardEdit ? ' <span class="muted">en el mapa</span>' : '') : '–'}</td>
         ${!cols ? '' : `<td>${played && st.putts != null ? st.putts : '–'}</td>
         <td>${st.fairway == null ? '<span class="muted">·</span>' : st.fairway ? '<span class="yes">✓</span>' : '<span class="no">✗</span>'}</td>
         <td>${!st.done || st.gir == null ? '<span class="muted">·</span>' : st.gir ? '<span class="yes">✓</span>' : '<span class="no">✗</span>'}</td>`}</tr>`);
@@ -2383,6 +2519,7 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
         <tbody>${rows.join('')}</tbody></table></div>
       <p class="legend"><span><span class="mark birdie">3</span> birdie</span><span><span class="mark eagle">2</span> eagle o mejor</span>
         <span><span class="mark bogey">5</span> bogey</span><span><span class="mark double">6</span> doble o peor</span></p>
+      ${round.holes.some((n) => holeStats(n).est) ? '<p class="legend"><span class="est">≈</span> golpes en el mapa estimados a partir del total de la tarjeta (no cuentan en tus estadísticas de palos ni de putts). Al mover un golpe pasa a ser tuyo.</p>' : ''}
       ${card ? `<p class="legend">${cardEdit ? 'Toca − o + en cada hoyo; con «−» por debajo de 1 el hoyo queda sin resultado. Se guarda al momento.' : `Importada de la tarjeta oficial${round.edited ? ' y editada por ti' : ''}. Toca un hoyo para apuntar en el mapa dónde acabó cada golpe y con qué palo.`}${missing ? ` ${missing} hoyo${missing === 1 ? '' : 's'} sin resultado (–).` : ''}${round.pars ? ' Prueba de pitch & putt: todos los hoyos par 3.' : ''}</p>` : ''}
 
       <h2 class="section-title">Estadísticas</h2>
@@ -2477,7 +2614,7 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
         const pos = withRound(r, () => positions(n));
         const pin = withRound(r, () => holeData(n).pin);
         hs.entries.forEach((e, i) => {
-          if (e.t !== 's' || !e.c || e.l === 'water' || e.l === 'ob') return;
+          if (e.t !== 's' || !e.c || e.est || e.l === 'water' || e.l === 'ob') return;
           const A = pos[i];
           const B = pos[i + 1];
           const d = GC.dist(A, B);
@@ -2500,7 +2637,7 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
     for (const r of list) {
       for (const n of r.holes) {
         const hs = r.scores && r.scores[n];
-        if (!hs || !hs.done || !hs.putts || !hs.entries.length) continue;
+        if (!hs || !hs.done || !hs.putts || !hs.entries.length || hs.entries.some((e) => e.est)) continue;
         const last = hs.entries[hs.entries.length - 1];
         if (last.t !== 's' || last.l !== 'green') continue;
         const d = withRound(r, () => GC.dist(positions(n).pop(), holeData(n).pin));
@@ -2822,6 +2959,7 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
         shotsN++;
         const pts = [pos[i]].concat(e.p || [], [pos[i + 1]]).map(S);
         c.strokeStyle = e.l === 'water' || e.l === 'ob' ? 'rgba(255,110,90,0.85)' : 'rgba(255,248,210,0.8)';
+        c.setLineDash(e.est ? [5, 5] : []); // estimados, discontinuos
         c.lineWidth = 2;
         c.lineCap = c.lineJoin = 'round';
         c.beginPath();
@@ -2883,6 +3021,7 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
         const left = GC.dist(B, h.pin);
         const dz = h.heightAt(B.x, B.y) - h.heightAt(A.x, A.y);
         const chips = [];
+        if (e.est) chips.push('Estimado');
         if (e.f) chips.push(`Vuelo ${shapeName(e.f).toLowerCase()}`);
         if (Math.abs(dz) >= 2) chips.push(`${dz > 0 ? 'Sube' : 'Baja'} ${Math.abs(dz).toFixed(0)} m`);
         const holed = hs.done && i === hs.entries.length - 1 && !hs.putts && left < 3;
@@ -2948,7 +3087,7 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
       header: {
         eyebrow: `Hoyo ${n} · par ${par}`, title: `Hoyo ${n}`,
         line: `${h.length} m · ${golpes(strokes)}${st.cardDone ? ` · ${parName(d)}` : ''}`,
-        chips: card ? ['Tarjeta, sin golpes en el mapa'] : [`${golpes(liveStrokes(hs))} apuntados`], tip: '',
+        chips: card ? ['Tarjeta, sin golpes en el mapa'] : [st.est ? 'Golpes estimados (≈)' : `${golpes(liveStrokes(hs))} apuntados`], tip: '',
       },
       end: {
         eyebrow: `Hoyo ${n} · resultado`, title: result,
