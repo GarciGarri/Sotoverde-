@@ -2909,7 +2909,23 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
         chips, tip: holeNote(n) || (card ? 'Apunta los golpes en el mapa para verlos dibujados.' : ''),
       },
       steps: card ? [] : steps,
+      others: otherRounds(n),
     };
+  }
+
+  // Golpes apuntados en el mismo hoyo en otras vueltas (las 8 más recientes), para compararlos en el 3D.
+  function otherRounds(n) {
+    const me = round;
+    return rounds.filter((r) => r !== me && r.id !== me.id && r.scores && r.scores[n] && r.scores[n].entries.length)
+      .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8)
+      .map((r) => withRound(r, () => {
+        const pos = positions(n);
+        const shots = [];
+        r.scores[n].entries.forEach((e, i) => {
+          if (e.t === 's') shots.push({ from: pos[i], to: pos[i + 1], path: e.p || null, lie: e.l });
+        });
+        return { date: r.date, shots };
+      }));
   }
 
   // Resumen de la vuelta (o de un hoyo) para el visor 3D.
@@ -2972,13 +2988,45 @@ Responde SOLO con JSON: {"club": id del palo o null, "toPin": metros que le qued
     }
     const clubs = CLUBS.filter((c) => bagClub(c.id).on).map((c) => `${c.name} ${bagClub(c.id).dist} m (${bagClub(c.id).shape}, fallo habitual: ${bagClub(c.id).miss})`);
     if (clubs.length) lines.push(`Bolsa del jugador (distancias habituales): ${clubs.join('; ')}.`);
-    return lines.join('\n').slice(0, 24000);
+    lines.push('', historyBrief(r));
+    return lines.join('\n').slice(0, 30000);
+  }
+
+  // Resumen de todo el historial para el entrenador: tendencia, hoyos que más cuestan, putts y palos.
+  function historyBrief(current) {
+    const P = progressData();
+    const lines = ['Historial del jugador en Sotoverde (todas sus vueltas guardadas):'];
+    const T = P.trend;
+    if (T.length) {
+      lines.push(`- ${T.length} vueltas de 18 hoyos completas. Últimas: ${T.slice(-8).map((p) => `${p.date.slice(0, 10)} ${signed(p.diff)}`).join(', ')}.`);
+      const best = T.slice().sort((a, b) => a.diff - b.diff)[0];
+      lines.push(`- Mejor vuelta: ${best.strokes} golpes (${signed(best.diff)}) el ${best.date.slice(0, 10)}.`);
+    }
+    if (P.lastHcp != null) lines.push(`- Hándicap de juego más reciente: ${P.lastHcp}.`);
+    const holes = P.holeRows.filter((h) => h.count >= 3);
+    if (holes.length) {
+      const ranked = holes.slice().sort((a, b) => b.excess - a.excess);
+      const f = (h) => `hoyo ${h.n} (par ${h.par}, ${sgn(h.excess)} vs. su hándicap, ${sgn(h.toPar)} al par, ${h.count} veces)`;
+      lines.push(`- Hoyos que más le cuestan para su hándicap: ${ranked.slice(0, 4).map(f).join('; ')}.`);
+      lines.push(`- Hoyos donde mejor juega: ${ranked.slice(-3).reverse().map(f).join('; ')}.`);
+      lines.push(`- Par o mejor en sus 8 últimas vueltas: ${pct(P.recent.under + P.recent.par, P.nRecent)} % de hoyos; dobles o peor: ${pct(P.recent.double, P.nRecent)} %.`);
+    }
+    const PS = puttStats().filter((x) => x.n);
+    if (PS.length) lines.push(`- Putts según el primer putt: ${PS.map((x) => `${x.label}: ${(x.putts / x.n).toFixed(1)} de media en ${x.n} hoyos`).join('; ')}.`);
+    const disp = clubDispersion();
+    const clubs = CLUBS.filter((c) => disp[c.id] && disp[c.id].length >= 2).map((c) => {
+      const ds = disp[c.id];
+      return `${c.name}: ${ds.length} golpes, mediana ${Math.round(quant(ds.map((x) => x.d), 0.5))} m, desvío mediano ${Math.round(quant(ds.map((x) => x.lat), 0.5))} m (+ = derecha)`;
+    });
+    if (clubs.length) lines.push(`- Palos medidos en el mapa: ${clubs.join('; ')}.`);
+    if (current) lines.push('La vuelta que está viendo ahora es la descrita arriba; compárala con su historial cuando sea útil.');
+    return lines.join('\n');
   }
 
   const COACH_RULES = (brief) => `Eres un entrenador de golf que repasa con un jugador amateur su vuelta en el campo Golf Sotoverde (Valladolid). \
 El jugador está viendo un resumen en 3D de la vuelta y te escribe comentarios: qué sintió, qué pasó en un golpe, dudas.
 Responde SIEMPRE en español, breve (2 a 5 frases), cercano y concreto. Relaciona lo que dice con los datos de la vuelta \
-(palos, distancias, lies, putts) y, si viene a cuento, da UN consejo práctico para la próxima vez. No inventes golpes ni datos que no estén abajo; \
+(palos, distancias, lies, putts) y con su historial (tendencia, hoyos que más le cuestan, putts, palos) y, si viene a cuento, da UN consejo práctico para la próxima vez. No inventes golpes ni datos que no estén abajo; \
 si te falta información, pregunta. Si el comentario es solo una nota (p. ej. «el viento estaba de cara»), confírmala en una frase y relaciónala con el hoyo.
 Cada mensaje del jugador empieza con el hoyo que estaba viendo entre corchetes.
 
@@ -3080,7 +3128,7 @@ ${brief}`;
     };
     render();
     const quick = coach.querySelector('.coach-quick');
-    for (const q of ['¿Dónde perdí más golpes?', '¿Qué practico esta semana?', 'Resúmeme la vuelta']) {
+    for (const q of ['¿Dónde perdí más golpes?', '¿Qué practico esta semana?', '¿Cómo voy en mis últimas vueltas?', 'Resúmeme la vuelta']) {
       const b = document.createElement('button');
       b.type = 'button';
       b.textContent = q;

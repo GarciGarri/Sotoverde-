@@ -281,6 +281,11 @@
       <div class="tour-shade"></div>
       <div class="tour-cap" aria-live="polite"></div>
       <button class="tour-play" aria-label="Reproducir: ${opts.button}"><span class="tri"></span><b>${opts.button}</b><small>${opts.sub}</small></button>
+      ${opts.data ? `<div class="tour-tools" hidden>
+        ${opts.data.holes.some((h) => h.others && h.others.length) ? '<button class="tt" data-t="others" aria-pressed="false">Otras vueltas</button>' : ''}
+        <button class="tt" data-t="free" aria-pressed="false">Cámara libre</button>
+        <button class="tt" data-t="shot">Guardar imagen</button>
+      </div>` : ''}
       <div class="tour-bar" hidden>
         <button class="tb" data-a="prev" aria-label="Tramo anterior">‹‹</button>
         <button class="tb" data-a="toggle" aria-label="Pausa">❚❚</button>
@@ -290,6 +295,7 @@
     drawPoster(player);
     container.querySelector('.tour-play').onclick = () => start(player);
     container.querySelectorAll('.tour-bar .tb').forEach((b) => (b.onclick = () => action(player, b.dataset.a)));
+    container.querySelectorAll('.tour-tools .tt').forEach((b) => (b.onclick = () => tool(player, b)));
     drawBar(player);
     caption(player, opts.first);
     bindSwipe(player);
@@ -309,7 +315,7 @@
     const c = player.container;
     let start = null;
     c.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('button, .tour-bar')) return;
+      if (e.target.closest('button, .tour-bar, .tour-tools') || player.free) return;
       start = { x: e.clientX, y: e.clientY };
     });
     c.addEventListener('pointercancel', () => (start = null));
@@ -347,6 +353,129 @@
     void c.offsetWidth;
     c.classList.add(dir > 0 ? 'swipe-l' : 'swipe-r');
     seekSeg(player, to);
+  }
+
+  // Herramientas del resumen: otras vueltas, cámara libre e imagen.
+  function tool(player, b) {
+    const t = b.dataset.t;
+    if (!player.three) return;
+    if (t === 'others') {
+      player.showOthers = !player.showOthers;
+      b.setAttribute('aria-pressed', String(player.showOthers));
+      if (!player.playing) render(player);
+    } else if (t === 'free') {
+      if (player.free) {
+        player.free = null;
+        player.container.classList.remove('free-cam');
+      } else {
+        pause(player);
+        const off = player.camPos.clone().sub(player.camLook);
+        const dist = off.length();
+        player.free = { target: player.camLook.clone(), dist, yaw: Math.atan2(off.x, off.z), pitch: Math.asin(GC.clamp(off.y / dist, -1, 1)) };
+        player.container.classList.add('free-cam');
+        bindFreeCam(player);
+        render(player);
+      }
+      b.setAttribute('aria-pressed', String(!!player.free));
+    } else if (t === 'shot') {
+      saveImage(player);
+    }
+  }
+
+  // Cámara libre: arrastrar gira alrededor del punto que se mira; rueda o pellizco acercan.
+  function bindFreeCam(player) {
+    if (player.freeBound) return;
+    player.freeBound = true;
+    const c = player.container.querySelector('.tour-gl');
+    const pts = new Map();
+    let pinch = null;
+    c.addEventListener('pointerdown', (e) => {
+      if (!player.free) return;
+      c.setPointerCapture(e.pointerId);
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 2) {
+        const [a, b] = [...pts.values()];
+        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), dist: player.free.dist };
+      }
+    });
+    c.addEventListener('pointermove', (e) => {
+      if (!player.free || !pts.has(e.pointerId)) return;
+      const prev = pts.get(e.pointerId);
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const f = player.free;
+      if (pts.size === 2 && pinch) {
+        const [a, b] = [...pts.values()];
+        f.dist = GC.clamp(pinch.dist * (pinch.d / Math.max(10, Math.hypot(a.x - b.x, a.y - b.y))), 8, 900);
+      } else {
+        f.yaw -= (e.clientX - prev.x) * 0.006;
+        f.pitch = GC.clamp(f.pitch + (e.clientY - prev.y) * 0.005, 0.08, 1.45);
+      }
+      render(player);
+    });
+    const up = (e) => {
+      pts.delete(e.pointerId);
+      if (pts.size < 2) pinch = null;
+    };
+    c.addEventListener('pointerup', up);
+    c.addEventListener('pointercancel', up);
+    c.addEventListener('wheel', (e) => {
+      if (!player.free) return;
+      e.preventDefault();
+      player.free.dist = GC.clamp(player.free.dist * Math.exp(e.deltaY * 0.0012), 8, 900);
+      render(player);
+    }, { passive: false });
+  }
+
+  // Guarda el fotograma con la ficha: con la capacidad de descargas de claude.ai o, fuera de ella, como enlace.
+  async function saveImage(player) {
+    render(player);
+    const gl = player.three.renderer.domElement;
+    const out = document.createElement('canvas');
+    out.width = gl.width;
+    out.height = gl.height;
+    const g = out.getContext('2d');
+    g.drawImage(gl, 0, 0);
+    const k = out.width / Math.max(1, player.container.clientWidth);
+    const grd = g.createLinearGradient(0, out.height * 0.55, 0, out.height);
+    grd.addColorStop(0, 'rgba(8,28,17,0)');
+    grd.addColorStop(1, 'rgba(8,28,17,0.88)');
+    g.fillStyle = grd;
+    g.fillRect(0, out.height * 0.55, out.width, out.height * 0.45);
+    const cap = player.container.querySelector('.tour-cap');
+    const text = (sel) => (cap.querySelector(sel) ? cap.querySelector(sel).textContent.trim() : '');
+    const x = 22 * k;
+    let y = out.height - 26 * k;
+    g.textBaseline = 'alphabetic';
+    g.fillStyle = 'rgba(255,255,255,0.75)';
+    g.font = `600 ${13 * k}px Barlow, system-ui, sans-serif`;
+    g.fillText('Golf Sotoverde · Mis vueltas', x, y);
+    y -= 26 * k;
+    g.fillStyle = '#ffffff';
+    g.font = `700 ${18 * k}px 'Barlow Condensed', 'Arial Narrow', sans-serif`;
+    g.fillText(text('.t-line'), x, y);
+    y -= 12 * k;
+    g.font = `800 ${40 * k}px 'Barlow Condensed', 'Arial Narrow', sans-serif`;
+    g.fillText(text('.t-title').toUpperCase(), x, y);
+    y -= 44 * k;
+    g.fillStyle = '#a8d672';
+    g.font = `700 ${12 * k}px Barlow, system-ui, sans-serif`;
+    g.fillText(text('.eyebrow').toUpperCase(), x, y);
+    const blob = await new Promise((ok) => out.toBlob(ok, 'image/png'));
+    const name = `sotoverde-${text('.t-title').toLowerCase().replace(/[^a-z0-9áéíóúñ]+/gi, '-').replace(/^-|-$/g, '') || 'resumen'}.png`;
+    const dl = global.claude && global.claude.use ? await global.claude.use('downloads').catch(() => null) : null;
+    if (dl) {
+      try {
+        await dl.save({ filename: name, data: blob });
+      } catch (e) {
+        /* el visitante no quiso guardarla */
+      }
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 
   // Libera la escena WebGL (los navegadores limitan cuántos contextos puede haber a la vez).
@@ -418,9 +547,15 @@
       caption(player, { eyebrow: 'Recorrido 3D', title: 'No disponible', line: 'No se pudo cargar el motor 3D o las imágenes del campo. Revisa la conexión y vuelve a intentarlo.', chips: [], tip: '' });
       return;
     }
-    c.classList.remove('loading', 'paused', 'ended');
+    c.classList.remove('loading', 'paused', 'ended', 'free-cam');
+    if (player.free) {
+      player.free = null;
+      const fb = c.querySelector('.tt[data-t="free"]');
+      if (fb) fb.setAttribute('aria-pressed', 'false');
+    }
     c.classList.add('playing');
     c.querySelector('.tour-bar').hidden = false;
+    if (c.querySelector('.tour-tools')) c.querySelector('.tour-tools').hidden = false;
     player.playing = true;
     player.last = performance.now();
     if (player.t >= player.duration) player.t = 0;
@@ -434,7 +569,8 @@
     const { model } = player;
     const { C } = model;
     const host = player.container.querySelector('.tour-gl');
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    // en los resúmenes se puede guardar la imagen: hace falta conservar el último fotograma
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: !!player.data });
     renderer.setPixelRatio(Math.min(global.devicePixelRatio || 1, 2));
     host.appendChild(renderer.domElement);
     const scene = new THREE.Scene();
@@ -805,8 +941,15 @@
     const only = kind === 'play' ? player.model.holes.indexOf(player.segs[s.seg].ho) : -1;
     labels.holes.forEach((l, i) => (l.visible = kind !== 'club' && (only < 0 || i === only)));
     if (player.data) drawReplay(player, s);
-    camera.position.copy(player.camPos);
-    camera.lookAt(player.camLook);
+    if (player.free) {
+      const f = player.free;
+      const cp = Math.cos(f.pitch);
+      camera.position.set(f.target.x + f.dist * cp * Math.sin(f.yaw), f.target.y + f.dist * Math.sin(f.pitch), f.target.z + f.dist * cp * Math.cos(f.yaw));
+      camera.lookAt(f.target);
+    } else {
+      camera.position.copy(player.camPos);
+      camera.lookAt(player.camLook);
+    }
     renderer.render(scene, camera);
     updateUi(player, s.seg, s.sub);
   }
@@ -1213,8 +1356,25 @@
       }
       return it;
     });
+    // golpes del mismo hoyo en otras vueltas, en azul tenue (se ven con «Otras vueltas»)
+    const others = new THREE.Group();
+    for (const o of s.hd.others || []) {
+      for (const sh of o.shots) {
+        const st = { A: s.ho.to(sh.from), B: s.ho.to(sh.to), P: sh.path && sh.path.length > 1 ? sh.path.map(s.ho.to) : null };
+        if (GC.dist(st.A, st.B) < 1) continue;
+        const pts = flightCurve(player, st, false);
+        const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 64, 0.22, 5, false),
+          new THREE.MeshBasicMaterial({ color: sh.lie === 'water' || sh.lie === 'ob' ? 0xff9c8c : 0x9fd0ff, transparent: true, opacity: 0.6, depthWrite: false }));
+        tube.renderOrder = 4;
+        const dot = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 6), new THREE.MeshBasicMaterial({ color: 0x9fd0ff }));
+        dot.position.copy(player.W(st.B.x, st.B.y, 0.5));
+        others.add(tube, dot);
+      }
+    }
+    others.visible = !!player.showOthers;
+    group.add(others);
     scene.add(group);
-    const g = { group, items };
+    const g = { group, items, others };
     groups.set(seg, g);
     return g;
   }
@@ -1237,6 +1397,7 @@
     }
     const g = replayGroup(player, sh.seg);
     g.group.visible = true;
+    g.others.visible = !!player.showOthers;
     const { j, k } = stepAt(s, player.t - s.t0);
     s.steps.forEach((st, i) => {
       const it = g.items[i];

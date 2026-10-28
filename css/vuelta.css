@@ -594,3 +594,14 @@ table.score tr.t-over td { background: rgba(200, 50, 42, 0.06); }
 }
 .dictate input:focus { outline: 2px solid var(--emerald); border-color: transparent; }
 .dictate .muted { flex-basis: 100%; font-size: 12.5px; }
+
+/* herramientas del resumen 3D */
+.tour-tools { position: absolute; z-index: 3; top: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 6px; max-width: calc(100% - 80px); }
+.tour-tools[hidden] { display: none; }
+.tour-tools .tt {
+  border: 0; border-radius: 999px; padding: 7px 12px; cursor: pointer; font: 700 12.5px/1 var(--font-body); color: #fff;
+  background: rgba(10, 30, 18, 0.55); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.tour-tools .tt[aria-pressed="true"] { background: var(--lime); color: #10301d; }
+.tour.free-cam .tour-gl { cursor: grab; touch-action: none; }
+.tour.free-cam .tour-cap { opacity: 0.35; }

@@ -64,9 +64,12 @@ ficha y en la marca 3D donde quedó la bola. Luego las penalizaciones con su dro
 hoyo; la vuelta empieza y acaba con el resumen (golpes, resultado al par, pares, bogeys, putts, mejor hoyo).
 Los hoyos de tarjetas importadas sin golpes en el mapa se enseñan con su resultado. Deslizando a izquierda o derecha
 (o con las flechas del teclado) se pasa al hoyo siguiente o anterior.
+En el visor: **Otras vueltas** superpone en azul los golpes de ese hoyo en tus otras vueltas, **Cámara libre** permite
+girar (arrastrar) y acercar (rueda o pellizco), y **Guardar imagen** descarga el fotograma con su ficha (PNG).
 Junto al visor hay un panel de **comentarios con IA**: lo que escribes se guarda en la vuelta marcado con el hoyo
 que estabas viendo (el vídeo se pausa al escribir) y vuelve a salir en la ficha final de ese hoyo. En la página
-publicada, Claude responde como entrenador con los datos de la vuelta (golpes explicados, resultado, bolsa); usa la
+publicada, Claude responde como entrenador con los datos de la vuelta (golpes explicados, resultado, bolsa) y de todo tu historial
+(tendencia, hoyos que más te cuestan, putts y palos medidos); usa la
 cuenta de Claude de quien lo ve y pide permiso la primera vez. Sin IA disponible, el comentario se guarda igual.
 
 **Mi progreso** (botón junto a «Tus vueltas»): resultado de cada vuelta de 18 hoyos y media de las 5 últimas; hoyo a
