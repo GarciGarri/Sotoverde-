@@ -856,6 +856,60 @@
     return sp;
   }
 
+  /*
+   * Encuadre sin perder información. La ficha tapa la parte de abajo del vídeo (y las herramientas, la de arriba):
+   * el centro de la imagen se lleva al hueco libre (desplazando la proyección) y la cámara se aleja, en su misma
+   * dirección, hasta que todos los puntos importantes del plano (salida, llegada, vuelo, bandera) caben en ese hueco.
+   */
+  function freeArea(player) {
+    const c = player.container;
+    // offsetTop/offsetHeight: sin las animaciones de entrada (transform), que harían temblar la cámara
+    const r = { width: c.clientWidth, height: c.clientHeight };
+    let top = 10;
+    let bottom = r.height - 10;
+    for (const el of c.querySelectorAll('.tour-tools:not([hidden]), .replay-full')) {
+      if (el.offsetParent === c && el.offsetTop < r.height / 3) top = Math.max(top, el.offsetTop + el.offsetHeight + 6);
+    }
+    const cap = c.querySelector('.tour-cap');
+    if (cap && cap.textContent.trim() && !c.classList.contains('free-cam')) bottom = Math.min(bottom, cap.offsetTop - 6);
+    const minH = r.height * 0.38; // con fichas muy altas (móvil) se acepta algo de solape antes que una franja mínima
+    if (bottom - top < minH) bottom = Math.min(r.height - 10, top + minH);
+    return { W: r.width, H: r.height, top, bottom };
+  }
+
+  const _v = { a: null };
+  function frameShot(player, s) {
+    const { camera } = player.three;
+    const area = freeArea(player);
+    if (!area.W || !area.H) return;
+    // centro óptico en el centro del hueco libre
+    const d = area.H / 2 - (area.top + area.bottom) / 2;
+    if (Math.abs(d) > 1 && !player.free) camera.setViewOffset(area.W, area.H + 2 * Math.abs(d), 0, d > 0 ? 2 * d : 0, area.W, area.H);
+    else camera.clearViewOffset();
+    if (!s.fit || !s.fit.length || player.free) return;
+    const THREE = global.THREE;
+    const v = _v.a || (_v.a = new THREE.Vector3());
+    const hy = ((area.bottom - area.top) / area.H) * 0.9; // medio alto del hueco en coordenadas normalizadas
+    const hx = 0.88;
+    const dir = s.pos.clone().sub(s.look);
+    const fits = () => {
+      camera.position.copy(s.pos);
+      camera.lookAt(s.look);
+      camera.updateMatrixWorld();
+      for (const p of s.fit) {
+        v.copy(p).applyMatrix4(camera.matrixWorldInverse);
+        if (v.z > -1) return false; // detrás de la cámara
+        v.applyMatrix4(camera.projectionMatrix);
+        if (Math.abs(v.x) > hx || Math.abs(v.y) > hy) return false;
+      }
+      return true;
+    };
+    for (let i = 0; i < 16 && !fits(); i++) {
+      dir.multiplyScalar(1.12);
+      s.pos.copy(s.look).add(dir);
+    }
+  }
+
   function resize(player) {
     const { renderer, camera } = player.three;
     const r = player.container.getBoundingClientRect();
@@ -917,13 +971,14 @@
     const py = from.y + (to.y - from.y) * e;
     const lift = (42 + L * 0.15) * (1 - e) + 30 * e;
     const lookPt = { x: ho.tee.x + (ho.pin.x - ho.tee.x) * (0.55 + 0.45 * e), y: ho.tee.y + (ho.pin.y - ho.tee.y) * (0.55 + 0.45 * e) };
-    return { pos: W(px, py, lift), look: W(lookPt.x, lookPt.y, 2), seg, sub: 0 };
+    return { pos: W(px, py, lift), look: W(lookPt.x, lookPt.y, 2), seg, sub: 0, fit: [W(ho.pin.x, ho.pin.y, 12)] };
   }
 
   function render(player) {
     if (!player.three) return;
     const { renderer, scene, camera, labels } = player.three;
     const s = shot(player, player.t);
+    frameShot(player, s);
     const key = s.seg + ':' + s.sub;
     if (player.camPos && player.t - (player.lastT || 0) < 0.5 && player.camKey !== key) {
       // cambio de plano: deslizamiento rápido en lugar de corte seco
@@ -1444,7 +1499,12 @@
       const side = d * 0.08;
       const pos = W(A.x - u.x * back - u.y * side, A.y - u.y * back + u.x * side, lift);
       const lf = 0.35 + 0.65 * e;
-      return { pos, look: W(A.x + (B.x - A.x) * lf, A.y + (B.y - A.y) * lf, 2), seg, sub: j };
+      // lo que debe verse: salida, llegada, el vértice del vuelo y la marca del lie encima de la bola
+      const it = player.three && player.three.groups && player.three.groups.get(seg) ? player.three.groups.get(seg).items[j] : null;
+      const fit = [W(A.x, A.y, 1), W(st.B.x, st.B.y, 1), W(st.B.x, st.B.y, 7)];
+      if (it && it.pts.length > 2) fit.push(it.pts[Math.floor(it.pts.length * 0.55)]);
+      if (st.kind === 'putts') fit.push(W(ho.pin.x, ho.pin.y, 9));
+      return { pos, look: W(A.x + (B.x - A.x) * lf, A.y + (B.y - A.y) * lf, 2), seg, sub: j, fit };
     }
     // presentación y cierre del hoyo: vista de todo el hoyo desde detrás del tee
     const L = GC.dist(ho.tee, ho.pin) || 1;
@@ -1455,7 +1515,10 @@
     const lift = st.kind === 'end' ? L * 0.55 + 35 : L * (0.5 - 0.15 * e) + 35;
     const side = st.kind === 'end' ? (L * 0.2 + 15) * (e - 0.5) : 0;
     const pos = W(mid.x - u.x * back - u.y * side, mid.y - u.y * back + u.x * side, lift);
-    return { pos, look: W(mid.x + u.x * L * 0.08, mid.y + u.y * L * 0.08, 0), seg, sub: j };
+    // todo el hoyo: tee, bandera y cada bola del hoyo
+    const fit = [W(ho.tee.x, ho.tee.y, 1), W(ho.pin.x, ho.pin.y, 9)];
+    for (const x of s.steps) if (x.B) fit.push(W(x.B.x, x.B.y, 5));
+    return { pos, look: W(mid.x + u.x * L * 0.08, mid.y + u.y * L * 0.08, 0), seg, sub: j, fit };
   }
 
   // Resumen: vuelo alto sobre los hoyos jugados.
@@ -1465,7 +1528,7 @@
     const span = Math.max(150, ...pts.map((p) => GC.dist(p, c))) * 1.25;
     const a = (opening ? -2.0 : -0.6) + k * 0.7;
     const pos = player.W(c.x + Math.cos(a) * span, c.y + Math.sin(a) * span, span * 0.7);
-    return { pos, look: player.W(c.x, c.y, 0), seg, sub: 0 };
+    return { pos, look: player.W(c.x, c.y, 0), seg, sub: 0, fit: pts.map((p) => player.W(p.x, p.y, 4)) };
   }
 
   function pause(player) {

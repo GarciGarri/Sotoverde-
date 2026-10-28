@@ -626,3 +626,17 @@ table.score tr.t-over td { background: rgba(200, 50, 42, 0.06); }
   .replay-full b { display: none; }
   .replay-full { width: 44px; padding: 0; justify-content: center; top: max(20px, calc(env(safe-area-inset-top, 0px) + 8px)); right: max(72px, calc(env(safe-area-inset-right, 0px) + 60px)); }
 }
+
+/* resumen 3D en el móvil: ficha compacta para dejar ver el golpe */
+@media (max-width: 600px) {
+  .replay-modal .replay-wrap .tour { height: 58%; }
+  .replay-modal.immersive .replay-wrap .tour { height: 100%; }
+  .tour.replay .tour-cap { gap: 4px; bottom: 58px; }
+  .tour.replay .tour-cap .t-title { font-size: 26px; }
+  .tour.replay .tour-cap .t-line { font-size: 14px; }
+  .tour.replay .tour-cap .t-chips span { font-size: 11.5px; padding: 4px 7px; }
+  .tour.replay .tour-cap .t-tip { font-size: 12px; }
+  .tour.replay .tour-cap .t-lie { font-size: 13px; padding: 3px 10px 3px 3px; }
+  .tour.replay .tour-cap .t-lie img { width: 26px; height: 26px; }
+  .tour.replay .tour-shade { background: linear-gradient(180deg, rgba(8, 28, 17, 0.3) 0%, rgba(8, 28, 17, 0) 18%, rgba(8, 28, 17, 0) 55%, rgba(8, 28, 17, 0.85) 100%); }
+}
